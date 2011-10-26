@@ -1,12 +1,20 @@
-#include "unicode/utf8.h"
-#include "unicode/uchar.h"
+#include <unicode/utf8.h>
+#include <unicode/uchar.h>
+
+#include <llvm/Value.h>
+#include <llvm/Module.h>
+#include <llvm/Support/IRBuilder.h>
 
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <vector>
+#include <map>
 #include <cstdio>
 #include <cstdlib>
+
+static int indent_step = 2;
+static int indent;
 
 // input file
 static std::string file;
@@ -35,8 +43,15 @@ static bool is_special(UChar32 c)
 
 #define NEXT_CHAR(c) do { \
     ip = i; \
+    if (i >= length) { \
+        std::cerr << "End of file reached in line " << __LINE__ << std::endl; \
+        exit(EXIT_FAILURE); \
+    } \
     U8_NEXT(s, i, length, c); \
-    if (c < 0) std::cerr << "File encoding error" << std::endl; \
+    if (c < 0) { \
+        std::cerr << "File encoding error" << std::endl; \
+        exit(EXIT_FAILURE); \
+    } \
 } while (0)
 
 static int32_t gettok()
@@ -50,7 +65,7 @@ static int32_t gettok()
     if (!i && length) NEXT_CHAR(c);
 
     // skip line breaks
-    while (c == '\n') {
+    while (i < length && c == '\n') {
         NEXT_CHAR(c);
     }
 
@@ -87,6 +102,10 @@ static int32_t gettok()
             } else {
                 ss.write(&s[ip], i - ip);
             }
+            if (i >= length) {
+                std::cerr << "End of file reached while parsing string literal" << std::endl;
+                ::exit(EXIT_FAILURE);
+            }
             NEXT_CHAR(c);
         }
         // read closing "
@@ -99,41 +118,62 @@ static int32_t gettok()
         return this_char;
     } else {
         std::stringstream ss;
-        ss.write(&s[ip], i - ip);
-        NEXT_CHAR(c);
-        while (!is_special(c)) {
+        do {
             ss.write(&s[ip], i - ip);
             NEXT_CHAR(c);
-        }
+        } while (!is_special(c) && i < length);
         identifier_value = ss.str();
         return tok_identifier;
+    }
+}
+
+
+static void print_space(int num)
+{
+    for (int i = 0; i < num; ++i) {
+        std::cout << " ";
     }
 }
 
 class ExprAST {
 public:
     virtual ~ExprAST() {}
+    virtual llvm::Value *Codegen() = 0;
+    virtual void print_node() = 0;
 };
 
 // Atoms
-class AtomExprAST : public ExprAST {};
-
-class IntegerExprAST : public AtomExprAST {
+class IntegerExprAST : public ExprAST {
     long integer_;
 public:
     IntegerExprAST(long integer) : integer_(integer) {}
+    virtual llvm::Value *Codegen();
+    void print_node() {
+        print_space(indent);
+        std::cout << "IntegerExprAST: " << integer_ << std::endl;
+    }
 };
 
-class StringExprAST : public AtomExprAST {
+class StringExprAST : public ExprAST {
     std::string string_;
 public:
     StringExprAST(const std::string &string) : string_(string) {}
+    virtual llvm::Value *Codegen();
+    void print_node() {
+        print_space(indent);
+        std::cout << "StringExprAST: " << string_ << std::endl;
+    }
 };
 
-class IdentifierExprAST : public AtomExprAST {
+class IdentifierExprAST : public ExprAST {
     std::string string_;
 public:
     IdentifierExprAST(const std::string &string) : string_(string) {}
+    virtual llvm::Value *Codegen();
+    void print_node() {
+        print_space(indent);
+        std::cout << "IdentifierExprAST: " << string_ << std::endl;
+    }
 };
 
 // Functions
@@ -143,6 +183,15 @@ class FuncTypeExprAST : public ExprAST {
 public:
     FuncTypeExprAST(ExprAST *atom, ExprAST *func_type)
         : atom_(atom), func_type_(func_type) {}
+    virtual llvm::Value *Codegen();
+    void print_node() {
+        print_space(indent);
+        std::cout << "FuncTypeExprAST:" << std::endl;
+        indent += indent_step;
+        atom_->print_node();
+        if (func_type_) func_type_->print_node();
+        indent -= indent_step;
+    }
 };
 
 class ApplyExprAST : public ExprAST {
@@ -151,6 +200,15 @@ class ApplyExprAST : public ExprAST {
 public:
     ApplyExprAST(ExprAST *func_type, ExprAST *apply)
         : func_type_(func_type), apply_(apply) {}
+    virtual llvm::Value *Codegen();
+    void print_node() {
+        print_space(indent);
+        std::cout << "ApplyExprAST:" << std::endl;
+        indent += indent_step;
+        func_type_->print_node();
+        if (apply_) apply_->print_node();
+        indent -= indent_step;
+    }
 };
 
 class UnaryExprAST : public ExprAST {
@@ -159,6 +217,14 @@ class UnaryExprAST : public ExprAST {
 public:
     UnaryExprAST(bool underscore, ExprAST *apply)
         : underscore_(underscore), apply_(apply) {}
+    virtual llvm::Value *Codegen();
+    void print_node() {
+        print_space(indent);
+        std::cout << "UnaryExprAST: " << (underscore_ ? "_" : "no_") << std::endl;
+        indent += indent_step;
+        if (apply_) apply_->print_node();
+        indent -= indent_step;
+    }
 };
 
 class MulExprAST : public ExprAST {
@@ -167,6 +233,15 @@ class MulExprAST : public ExprAST {
 public:
     MulExprAST(int opcode, ExprAST *lhs, ExprAST *rhs)
         : opcode_(opcode), lhs_(lhs), rhs_(rhs) {}
+    virtual llvm::Value *Codegen();
+    void print_node() {
+        print_space(indent);
+        std::cout << "MulExprAST: " << char(opcode_) << std::endl;
+        indent += indent_step;
+        if (lhs_) lhs_->print_node();
+        if (rhs_) rhs_->print_node();
+        indent -= indent_step;
+    }
 };
 
 class AddExprAST : public ExprAST {
@@ -175,6 +250,15 @@ class AddExprAST : public ExprAST {
 public:
     AddExprAST(int opcode, ExprAST *lhs, ExprAST *rhs)
         : opcode_(opcode), lhs_(lhs), rhs_(rhs) {}
+    virtual llvm::Value *Codegen();
+    void print_node() {
+        print_space(indent);
+        std::cout << "AddExprAST: " << char(opcode_) << std::endl;
+        indent += indent_step;
+        if (lhs_) lhs_->print_node();
+        if (rhs_) rhs_->print_node();
+        indent -= indent_step;
+    }
 };
 
 class BitExprAST : public ExprAST {
@@ -184,6 +268,15 @@ class BitExprAST : public ExprAST {
 public:
     BitExprAST(int opcode, bool signshift, ExprAST *lhs, ExprAST *rhs)
         : opcode_(opcode), signshift_(signshift), lhs_(lhs), rhs_(rhs) {}
+    virtual llvm::Value *Codegen();
+    void print_node() {
+        print_space(indent);
+        std::cout << "BitExprAST: " << char(opcode_) << (signshift_ ? ">" : "") << std::endl;
+        indent += indent_step;
+        if (lhs_) lhs_->print_node();
+        if (rhs_) rhs_->print_node();
+        indent -= indent_step;
+    }
 };
 
 class CompLTExprAST : public ExprAST {
@@ -193,6 +286,15 @@ class CompLTExprAST : public ExprAST {
 public:
     CompLTExprAST(int opcode, bool equal, ExprAST *lhs, ExprAST *rhs)
         : opcode_(opcode), equal_(equal), lhs_(lhs), rhs_(rhs) {}
+    virtual llvm::Value *Codegen();
+    void print_node() {
+        print_space(indent);
+        std::cout << "CompLTExprAST: " << char(opcode_) << (equal_ ? "=" : "") << std::endl;
+        indent += indent_step;
+        if (lhs_) lhs_->print_node();
+        if (rhs_) rhs_->print_node();
+        indent -= indent_step;
+    }
 };
 
 class CompEQExprAST : public ExprAST {
@@ -201,6 +303,15 @@ class CompEQExprAST : public ExprAST {
 public:
     CompEQExprAST(int opcode, ExprAST *lhs, ExprAST *rhs)
         : opcode_(opcode), lhs_(lhs), rhs_(rhs) {}
+    virtual llvm::Value *Codegen();
+    void print_node() {
+        print_space(indent);
+        std::cout << "CompEQExprAST: " << char(opcode_) << (opcode_ ? "=" : "") << std::endl;
+        indent += indent_step;
+        if (lhs_) lhs_->print_node();
+        if (rhs_) rhs_->print_node();
+        indent -= indent_step;
+    }
 };
 
 class LambdaExprAST : public ExprAST {
@@ -208,6 +319,16 @@ class LambdaExprAST : public ExprAST {
 public:
     LambdaExprAST(ExprAST *tuple, ExprAST *func_type, ExprAST *logical_or)
         : tuple_(tuple), func_type_(func_type), logical_or_(logical_or) {}
+    virtual llvm::Value *Codegen();
+    void print_node() {
+        print_space(indent);
+        std::cout << "LambdaExprAST:" << std::endl;
+        indent += indent_step;
+        if (tuple_) tuple_->print_node();
+        if (func_type_) func_type_->print_node();
+        if (logical_or_) logical_or_->print_node();
+        indent -= indent_step;
+    }
 };
 
 class AssignExprAST : public ExprAST {
@@ -215,6 +336,15 @@ class AssignExprAST : public ExprAST {
 public:
     AssignExprAST(ExprAST *lambda, ExprAST *lambda2)
         : lambda_(lambda), lambda2_(lambda2) {}
+    virtual llvm::Value *Codegen();
+    void print_node() {
+        print_space(indent);
+        std::cout << "AssignExprAST:" << std::endl;
+        indent += indent_step;
+        if (lambda_) lambda_->print_node();
+        if (lambda2_) lambda2_->print_node();
+        indent -= indent_step;
+    }
 };
 
 class ControlExprAST : public ExprAST {
@@ -223,6 +353,16 @@ class ControlExprAST : public ExprAST {
 public:
     ControlExprAST(bool terniary, ExprAST *expr1, ExprAST *expr2, ExprAST *expr3)
         : terniary_(terniary), expr1_(expr1), expr2_(expr2), expr3_(expr3) {}
+    virtual llvm::Value *Codegen();
+    void print_node() {
+        print_space(indent);
+        std::cout << "ControlExprAST: " << "tern " << (terniary_ ? "true" : "false") << std::endl;
+        indent += indent_step;
+        if (expr1_) expr1_->print_node();
+        if (expr2_) expr2_->print_node();
+        if (expr3_) expr3_->print_node();
+        indent -= indent_step;
+    }
 };
 
 class ListExprAST : public ExprAST {
@@ -230,7 +370,120 @@ class ListExprAST : public ExprAST {
 public:
     ListExprAST(const std::vector<ExprAST *> &exprs)
         : exprs_(exprs) {}
+    virtual llvm::Value *Codegen();
+    void print_node() {
+        print_space(indent);
+        std::cout << "ListExprAST:" << std::endl;
+        indent += indent_step;
+        for (size_t i = 0; i < exprs_.size(); ++i) {
+            if (exprs_[i]) exprs_[i]->print_node();
+        }
+        indent -= indent_step;
+    }
 };
+
+class FileExprAST : public ExprAST {
+    std::vector<ExprAST *> exprs_;
+public:
+    FileExprAST(const std::vector<ExprAST *> &exprs)
+        : exprs_(exprs) {}
+    virtual llvm::Value *Codegen();
+    void print_node() {
+        print_space(indent);
+        std::cout << "FileExprAST: size " << exprs_.size() << std::endl;
+        indent += indent_step;
+        for (size_t i = 0; i < exprs_.size(); ++i) {
+            if (exprs_[i]) exprs_[i]->print_node();
+        }
+        indent -= indent_step;
+    }
+};
+
+static ExprAST *error(const char *str);
+llvm::Value *errorv(const char *str) { error(str); return 0; }
+
+static llvm::Module *TheModule;
+static llvm::IRBuilder<> Builder(llvm::getGlobalContext());
+static std::map<std::string, llvm::Value *> NamedValues;
+
+llvm::Value *IntegerExprAST::Codegen() {
+  return llvm::ConstantInt::get(llvm::getGlobalContext(), llvm::APInt(64, integer_, true));
+}
+
+llvm::Value *IdentifierExprAST::Codegen() {
+    /* FIXME */
+  return NULL;
+}
+
+llvm::Value *FuncTypeExprAST::Codegen() {
+    /* FIXME */
+  return NULL;
+}
+
+llvm::Value *StringExprAST::Codegen() {
+    /* FIXME */
+  return NULL;
+}
+
+llvm::Value *ApplyExprAST::Codegen() {
+    /* FIXME */
+  return NULL;
+}
+
+llvm::Value *UnaryExprAST::Codegen() {
+    /* FIXME */
+  return NULL;
+}
+
+llvm::Value *MulExprAST::Codegen() {
+    /* FIXME */
+  return NULL;
+}
+
+llvm::Value *AddExprAST::Codegen() {
+    /* FIXME */
+  return NULL;
+}
+
+llvm::Value *BitExprAST::Codegen() {
+    /* FIXME */
+  return NULL;
+}
+
+llvm::Value *CompLTExprAST::Codegen() {
+    /* FIXME */
+  return NULL;
+}
+
+llvm::Value *CompEQExprAST::Codegen() {
+    /* FIXME */
+  return NULL;
+}
+
+llvm::Value *LambdaExprAST::Codegen() {
+    /* FIXME */
+  return NULL;
+}
+
+llvm::Value *ListExprAST::Codegen() {
+    /* FIXME */
+  return NULL;
+}
+
+llvm::Value *AssignExprAST::Codegen() {
+    /* FIXME */
+  return NULL;
+}
+
+llvm::Value *ControlExprAST::Codegen() {
+    /* FIXME */
+  return NULL;
+}
+
+llvm::Value *FileExprAST::Codegen() {
+    /* FIXME */
+  return NULL;
+}
 
 /// CurTok/getNextToken - Provide a simple token buffer.  CurTok is the current
 /// token the parser is looking at.  getNextToken reads another token from the
@@ -308,9 +561,10 @@ static ExprAST *parse_control() {
                        || cur_tok == tok_identifier) {
         expr1 = parse_assign();
         if (!expr1) return NULL;
-        if (cur_tok == '?')
+        if (cur_tok == '?') {
             terniary = true;
-        get_next_token();
+            get_next_token();
+        }
     }
     if (expr1 && !terniary) {
         return new ControlExprAST(false, expr1, expr2, expr3);
@@ -335,6 +589,20 @@ static ExprAST *parse_control() {
 
 static ExprAST *parse_expr() {
     return parse_control();
+}
+
+static ExprAST *parse_file() {
+    std::vector<ExprAST *> exprs;
+    ExprAST *expr = NULL;
+    while (cur_tok != tok_eof && (expr = parse_expr())) {
+        std::cout << cur_tok << std::endl;
+        exprs.push_back(expr);
+    }
+    if (exprs.size()) {
+        return new FileExprAST(exprs);
+    } else {
+        return error("Parse error");
+    }
 }
 
 static ExprAST *parse_list() {
@@ -390,7 +658,7 @@ static ExprAST *parse_apply() {
     if (!func_type) return NULL;
     if (cur_tok == ' ') {
         get_next_token();
-        func_type = parse_apply();
+        apply = parse_apply();
     }
     return new ApplyExprAST(func_type, apply);
 }
@@ -522,21 +790,24 @@ int main(int argc, char *argv[])
     std::ifstream in(argv[1]);
     file = static_cast<const std::stringstream &>(std::stringstream() << in.rdbuf()).str();
 
-    get_next_token();
-    // driver();
-    parse_expr();
-
-    // lexer test
-    // int token;
-    // while ((token = gettok()) != tok_eof) {
-    //     if (token == tok_integer)
-    //         std::cout << "Integer: " << integer_value << std::endl;
-    //     else if (token == tok_string)
-    //         std::cout << "String: " << string_value << std::endl;
-    //     else if (token == tok_identifier)
-    //         std::cout << "Identifier: " << identifier_value << std::endl;
-    //     else
-    //         std::cout << "Char: " << token << "/" << char(token) << std::endl;
-    // }
+    bool test_lexer = false;
+    if (!test_lexer) {
+        get_next_token();
+        // driver();
+        ExprAST *ast = parse_file();
+        ast->print_node();
+    } else {
+        int token;
+        while ((token = gettok()) != tok_eof) {
+            if (token == tok_integer)
+                std::cout << "Integer: " << integer_value << std::endl;
+            else if (token == tok_string)
+                std::cout << "String: " << string_value << std::endl;
+            else if (token == tok_identifier)
+                std::cout << "Identifier: " << identifier_value << std::endl;
+            else
+                std::cout << "Char: " << token << "/" << char(token) << std::endl;
+        }
+    }
     return 0;
 }

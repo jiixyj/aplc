@@ -1,2 +1,2 @@
 add_executable(aplc main)
-target_link_libraries(aplc icuuc)
+target_link_libraries(aplc icuuc LLVMCore LLVMSupport LLVMSystem)
