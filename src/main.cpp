@@ -570,7 +570,7 @@ static ExprAST *parse_control() {
         return new ControlExprAST(false, expr1, expr2, expr3);
     }
     if (!expr1) {
-        expr1 = parse_expr();
+        expr1 = parse_assign();
         if (!expr1) return NULL;
         if (cur_tok != '?')
             return error("expected ternary operator");
@@ -595,7 +595,6 @@ static ExprAST *parse_file() {
     std::vector<ExprAST *> exprs;
     ExprAST *expr = NULL;
     while (cur_tok != tok_eof && (expr = parse_expr())) {
-        std::cout << cur_tok << std::endl;
         exprs.push_back(expr);
     }
     if (exprs.size()) {
@@ -795,7 +794,7 @@ int main(int argc, char *argv[])
         get_next_token();
         // driver();
         ExprAST *ast = parse_file();
-        ast->print_node();
+        if (ast) ast->print_node();
     } else {
         int token;
         while ((token = gettok()) != tok_eof) {
