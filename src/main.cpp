@@ -202,10 +202,10 @@ public:
 };
 
 class LambdaExprAST : public ExprAST {
-    ExprAST *tuple_, *func_type_, *logical_or_;
+    ExprAST *tuple_, *func_type_, *expr_, *logical_or_;
 public:
-    LambdaExprAST(ExprAST *tuple, ExprAST *func_type, ExprAST *logical_or)
-        : tuple_(tuple), func_type_(func_type), logical_or_(logical_or) {}
+    LambdaExprAST(ExprAST *tuple, ExprAST *func_type, ExprAST *expr, ExprAST *logical_or)
+        : tuple_(tuple), func_type_(func_type), expr_(expr), logical_or_(logical_or) {}
     virtual llvm::Value *Codegen();
     void print_node() {
         print_space(indent);
@@ -213,6 +213,7 @@ public:
         indent += indent_step;
         if (tuple_) tuple_->print_node();
         if (func_type_) func_type_->print_node();
+        if (expr_) expr_->print_node();
         if (logical_or_) logical_or_->print_node();
         indent -= indent_step;
     }
@@ -379,6 +380,8 @@ static ExprAST *error(const char *str)
     return 0;
 }
 
+#define SKIP_WHITESPACE while (::isspace(int(t->cur_tok->c()))) t->get_next_token()
+
 static ExprAST *parse_expr();
 static ExprAST *parse_tuple();
 static ExprAST *parse_func_type();
@@ -386,6 +389,7 @@ static ExprAST *parse_comp_eq();
 
 /// expr_atom ::= INTEGER
 static ExprAST *parse_atom() {
+    SKIP_WHITESPACE;
     ExprAST *result = NULL;
     switch (t->cur_tok->type) {
       case TOK_INTEGER:
@@ -403,27 +407,33 @@ static ExprAST *parse_atom() {
 }
 
 static ExprAST *parse_lambda() {
-    ExprAST *tuple = NULL, *func_type = NULL, *logical_or = NULL;
+    SKIP_WHITESPACE;
+    ExprAST *tuple = NULL, *func_type = NULL, *expr = NULL, *logical_or = NULL;
     if (t->cur_tok->c() == '(') {
         tuple = parse_tuple();
         if (!tuple) return NULL;
+        SKIP_WHITESPACE;
         if (t->cur_tok->c() != 0x2192)
             return error("arrow expected");
         t->get_next_token();
         func_type = parse_func_type();
-        if (!func_type) return NULL;
+        if (!func_type) return error("error parsing func_type in lambda");
+        expr = parse_expr();
+        if (!expr) return error("error parsing expr in lambda");
     } else {
         /* FIXME */
         logical_or = parse_comp_eq();
         if (!logical_or) return NULL;
     }
-    return new LambdaExprAST(tuple, func_type, logical_or);
+    return new LambdaExprAST(tuple, func_type, expr, logical_or);
 }
 
 
 static ExprAST *parse_assign() {
+    SKIP_WHITESPACE;
     ExprAST *lambda = parse_lambda(), *lambda2 = NULL;
     if (!lambda) return NULL;
+    SKIP_WHITESPACE;
     if (t->cur_tok->c() == '=') {
         t->get_next_token();
         lambda2 = parse_lambda();
@@ -433,13 +443,15 @@ static ExprAST *parse_assign() {
 }
 
 static ExprAST *parse_control() {
+    SKIP_WHITESPACE;
     ExprAST *expr1 = NULL, *expr2 = NULL, *expr3 = NULL;
     bool terniary = false;
     if (t->cur_tok->c() == '(' || t->cur_tok->type == TOK_INTEGER
-                             || t->cur_tok->type == TOK_STRING
-                             || t->cur_tok->type == TOK_IDENTIFIER) {
+                               || t->cur_tok->type == TOK_STRING
+                               || t->cur_tok->type == TOK_IDENTIFIER) {
         expr1 = parse_assign();
         if (!expr1) return NULL;
+        SKIP_WHITESPACE;
         if (t->cur_tok->c() == '?') {
             terniary = true;
             t->get_next_token();
@@ -451,12 +463,14 @@ static ExprAST *parse_control() {
     if (!expr1) {
         expr1 = parse_assign();
         if (!expr1) return NULL;
+        SKIP_WHITESPACE;
         if (t->cur_tok->c() != '?')
             return error("expected ternary operator");
         t->get_next_token();
     }
     expr2 = parse_expr();
     if (!expr2) return NULL;
+    SKIP_WHITESPACE;
     if (t->cur_tok->c() != ':')
         return error("expected : from ternary operator");
     t->get_next_token();
@@ -489,16 +503,19 @@ static ExprAST *parse_list() {
     if (!expr) return NULL;
     exprs.push_back(expr);
 
+    SKIP_WHITESPACE;
     while (t->cur_tok->c() == ',') {
         t->get_next_token();
         expr = parse_expr();
         if (!expr) return NULL;
         exprs.push_back(expr);
+        SKIP_WHITESPACE;
     }
     return new ListExprAST(exprs);
 }
 
 static ExprAST *parse_array() {
+    SKIP_WHITESPACE;
     t->get_next_token();  // eat [
     ExprAST *list = parse_list();
     if (!list) return NULL;
@@ -510,9 +527,11 @@ static ExprAST *parse_array() {
 }
 
 static ExprAST *parse_tuple() {
-    t->get_next_token();  // eat [
+    SKIP_WHITESPACE;
+    t->get_next_token();  // eat (
     ExprAST *list = parse_list();
-    if (!list) return NULL;
+    if (!list) return error("error parsing list");
+    SKIP_WHITESPACE;
     if (t->cur_tok->c() != ')') {
         return error("no terminating )");
     }
@@ -520,10 +539,10 @@ static ExprAST *parse_tuple() {
     return list;
 }
 
-
 static ExprAST *parse_func_type() {
     ExprAST *atom = parse_atom(), *func_type = NULL;
     if (!atom) return NULL;
+    SKIP_WHITESPACE;
     if (t->cur_tok->c() == 0x2192) {
         t->get_next_token();
         func_type = parse_func_type();
@@ -535,6 +554,7 @@ static ExprAST *parse_apply() {
     ExprAST *func_type = parse_func_type(), *apply = NULL;
     if (!func_type) return NULL;
     if (t->cur_tok->c() == ' ') {
+        /* FIXME allow only spaces between arguments */
         t->get_next_token();
         apply = parse_apply();
     }
@@ -542,6 +562,7 @@ static ExprAST *parse_apply() {
 }
 
 static ExprAST *parse_unary() {
+    SKIP_WHITESPACE;
     bool underscore = false;
 
     if (t->cur_tok->c() == '_') {
@@ -558,6 +579,7 @@ static ExprAST *parse_mul() {
     ExprAST *lhs = parse_unary(), *rhs = NULL;
     if (!lhs) return NULL;
 
+    SKIP_WHITESPACE;
     if (t->cur_tok->c() == '*' || t->cur_tok->c() == '/' || t->cur_tok->c() == '%') {
         opcode = int(t->cur_tok->c());
         t->get_next_token();
@@ -572,6 +594,7 @@ static ExprAST *parse_add() {
     ExprAST *lhs = parse_mul(), *rhs = NULL;
     if (!lhs) return NULL;
 
+    SKIP_WHITESPACE;
     if (t->cur_tok->c() == '+' || t->cur_tok->c() == '-') {
         opcode = int(t->cur_tok->c());
         t->get_next_token();
@@ -587,6 +610,7 @@ static ExprAST *parse_bit() {
     ExprAST *lhs = parse_add(), *rhs = NULL;
     if (!lhs) return NULL;
 
+    SKIP_WHITESPACE;
     if (t->cur_tok->c() == '|' || t->cur_tok->c() == '^' || t->cur_tok->c() == '&') {
         opcode = int(t->cur_tok->c());
         t->get_next_token();
@@ -615,6 +639,7 @@ static ExprAST *parse_comp_lt() {
     ExprAST *lhs = parse_bit(), *rhs = NULL;
     if (!lhs) return NULL;
 
+    SKIP_WHITESPACE;
     if (t->cur_tok->c() == '<' || t->cur_tok->c() == '>') {
         opcode = int(t->cur_tok->c());
         t->get_next_token();
@@ -634,6 +659,7 @@ static ExprAST *parse_comp_eq() {
     ExprAST *lhs = parse_comp_lt(), *rhs = NULL;
     if (!lhs) return NULL;
 
+    SKIP_WHITESPACE;
     if (t->cur_tok->c() == '=' || t->cur_tok->c() == '!') {
         opcode = int(t->cur_tok->c());
         t->get_next_token();
@@ -650,13 +676,13 @@ static ExprAST *parse_comp_eq() {
 
 int main(int argc, char *argv[])
 {
-    t = (argc == 1) ? new Tokenizer() : new Tokenizer(argv[1]);
+    t = (argc <= 1) ? new Tokenizer() : new Tokenizer(argv[1]);
     if (!t->ok()) {
         std::cerr << "File could not be opened" << std::endl;
         exit(EXIT_FAILURE);
     }
 
-    bool test_lexer = true;
+    bool test_lexer = !strcmp(argv[argc - 1], "l");
     if (!test_lexer) {
         t->get_next_token();
         // driver();
