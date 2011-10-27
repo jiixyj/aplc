@@ -68,8 +68,9 @@ class FuncTypeExprAST : public ExprAST {
     ExprAST *atom_;
     ExprAST *func_type_;  // optional
 public:
-    FuncTypeExprAST(ExprAST *atom, ExprAST *func_type)
-        : atom_(atom), func_type_(func_type) {}
+    FuncTypeExprAST(ExprAST *atom, bool _only_spaces, ExprAST *func_type)
+        : atom_(atom), only_spaces(_only_spaces), func_type_(func_type) {}
+    bool only_spaces;
     virtual llvm::Value *Codegen();
     void print_node() {
         print_space(indent);
@@ -541,21 +542,27 @@ static ExprAST *parse_tuple() {
 
 static ExprAST *parse_func_type() {
     ExprAST *atom = parse_atom(), *func_type = NULL;
+    bool only_spaces = false;
     if (!atom) return NULL;
-    SKIP_WHITESPACE;
+    while (t->cur_tok->c() == ' ') {
+        only_spaces = true;
+        t->get_next_token();
+    }
+    while (::isspace(int(t->cur_tok->c()))) {
+        only_spaces = false;
+        t->get_next_token();
+    }
     if (t->cur_tok->c() == 0x2192) {
         t->get_next_token();
         func_type = parse_func_type();
     }
-    return new FuncTypeExprAST(atom, func_type);
+    return new FuncTypeExprAST(atom, only_spaces, func_type);
 }
 
 static ExprAST *parse_apply() {
     ExprAST *func_type = parse_func_type(), *apply = NULL;
     if (!func_type) return NULL;
-    if (t->cur_tok->c() == ' ') {
-        /* FIXME allow only spaces between arguments */
-        t->get_next_token();
+    if (dynamic_cast<FuncTypeExprAST *>(func_type)->only_spaces) {
         apply = parse_apply();
     }
     return new ApplyExprAST(func_type, apply);
