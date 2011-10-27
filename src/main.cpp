@@ -33,7 +33,7 @@ static std::string identifier_value;
 
 static bool is_special(UChar32 c)
 {
-    return c == '?' || c == ':' || c == '=' || c == '\u2192' ||
+    return c == '?' || c == ':' || c == '=' || c == U'\u2192' ||
            c == '|' || c == '^' || c == '&' || c == '!' ||
            c == '<' || c == '>' || c == '+' || c == '-' ||
            c == '*' || c == '/' || c == '%' || c == '_' ||
@@ -528,7 +528,7 @@ static ExprAST *parse_lambda() {
     if (cur_tok == '(') {
         tuple = parse_tuple();
         if (!tuple) return NULL;
-        if (cur_tok != '\u2192')
+        if (cur_tok != U'\u2192')
             return error("arrow expected");
         get_next_token();
         func_type = parse_func_type();
@@ -645,7 +645,7 @@ static ExprAST *parse_tuple() {
 static ExprAST *parse_func_type() {
     ExprAST *atom = parse_atom(), *func_type = NULL;
     if (!atom) return NULL;
-    if (cur_tok == '\u2192') {
+    if (cur_tok == U'\u2192') {
         get_next_token();
         func_type = parse_func_type();
     }
