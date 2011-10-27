@@ -18,7 +18,6 @@ static int indent;
 
 // input file
 static std::string file;
-static const uint8_t *s;
 
 enum Token {
     tok_eof = -1,
@@ -58,7 +57,7 @@ static int32_t gettok()
 {
     const char *s = file.c_str();
     static int32_t i, ip;
-    size_t length = file.size();
+    int32_t length = int32_t(file.size());
     static UChar32 c;
 
     // read first character
@@ -137,10 +136,11 @@ static void print_space(int num)
 
 class ExprAST {
 public:
-    virtual ~ExprAST() {}
+    virtual ~ExprAST();
     virtual llvm::Value *Codegen() = 0;
     virtual void print_node() = 0;
 };
+ExprAST::~ExprAST() {}
 
 // Atoms
 class IntegerExprAST : public ExprAST {
@@ -400,14 +400,14 @@ public:
 };
 
 static ExprAST *error(const char *str);
-llvm::Value *errorv(const char *str) { error(str); return 0; }
+static llvm::Value *errorv(const char *str) { error(str); return 0; }
 
 static llvm::Module *TheModule;
 static llvm::IRBuilder<> Builder(llvm::getGlobalContext());
 static std::map<std::string, llvm::Value *> NamedValues;
 
 llvm::Value *IntegerExprAST::Codegen() {
-  return llvm::ConstantInt::get(llvm::getGlobalContext(), llvm::APInt(64, integer_, true));
+  return llvm::ConstantInt::get(llvm::getGlobalContext(), llvm::APInt(64, uint64_t(integer_), true));
 }
 
 llvm::Value *IdentifierExprAST::Codegen() {
