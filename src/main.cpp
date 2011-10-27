@@ -1,6 +1,3 @@
-#include <unicode/utf8.h>
-#include <unicode/uchar.h>
-
 #include <llvm/Value.h>
 #include <llvm/Module.h>
 #include <llvm/Support/IRBuilder.h>
@@ -10,122 +7,12 @@
 #include <sstream>
 #include <vector>
 #include <map>
-#include <cstdio>
-#include <cstdlib>
+
+#include "tokenizer.h"
 
 static int indent_step = 2;
 static int indent;
-
-// input file
-static std::string file;
-
-enum Token {
-    tok_eof = -1,
-    tok_integer = -2,
-    tok_string = -3,
-    tok_identifier = -4
-};
-
-static long integer_value;
-static std::string string_value;
-static std::string identifier_value;
-
-static bool is_special(UChar32 c)
-{
-    return c == '?' || c == ':' || c == '=' || c == U'\u2192' ||
-           c == '|' || c == '^' || c == '&' || c == '!' ||
-           c == '<' || c == '>' || c == '+' || c == '-' ||
-           c == '*' || c == '/' || c == '%' || c == '_' ||
-           c == ' ' || c == ',' || c == '(' || c == ')' ||
-           c == '[' || c == ']' || c == '"';
-}
-
-#define NEXT_CHAR(c) do { \
-    ip = i; \
-    if (i >= length) { \
-        std::cerr << "End of file reached in line " << __LINE__ << std::endl; \
-        exit(EXIT_FAILURE); \
-    } \
-    U8_NEXT(s, i, length, c); \
-    if (c < 0) { \
-        std::cerr << "File encoding error" << std::endl; \
-        exit(EXIT_FAILURE); \
-    } \
-} while (0)
-
-static int32_t gettok()
-{
-    const char *s = file.c_str();
-    static int32_t i, ip;
-    int32_t length = int32_t(file.size());
-    static UChar32 c;
-
-    // read first character
-    if (!i && length) NEXT_CHAR(c);
-
-    // skip line breaks
-    while (i < length && c == '\n') {
-        NEXT_CHAR(c);
-    }
-
-    if (i >= length) {
-        return tok_eof;
-    } else if (c <= 0x7f && u_isdigit(c)) {
-        std::stringstream ss;
-        do {
-            ss.write(&s[ip], i - ip);
-            NEXT_CHAR(c);
-        } while (c <= 0x7f && u_isdigit(c));
-        ss >> integer_value;
-        return tok_integer;
-    } else if (c == '\"') {
-        std::stringstream ss;
-        NEXT_CHAR(c);
-        while (c != '\"') {
-            if (c == '\\') {
-                UChar32 new_char;
-                NEXT_CHAR(new_char);
-                switch (new_char) {
-                  case '\\':
-                    ss << '\\'; break;
-                  case '"':
-                    ss << '\"'; break;
-                  case 'n':
-                    ss << '\n'; break;
-                  case 't':
-                    ss << '\t'; break;
-                  default:
-                    std::cerr << "error parsing string literal" << std::endl;
-                    ::exit(EXIT_FAILURE);
-                }
-            } else {
-                ss.write(&s[ip], i - ip);
-            }
-            if (i >= length) {
-                std::cerr << "End of file reached while parsing string literal" << std::endl;
-                ::exit(EXIT_FAILURE);
-            }
-            NEXT_CHAR(c);
-        }
-        // read closing "
-        NEXT_CHAR(c);
-        string_value = ss.str();
-        return tok_string;
-    } else if (is_special(c)) {
-        int this_char = c;
-        NEXT_CHAR(c);
-        return this_char;
-    } else {
-        std::stringstream ss;
-        do {
-            ss.write(&s[ip], i - ip);
-            NEXT_CHAR(c);
-        } while (!is_special(c) && i < length);
-        identifier_value = ss.str();
-        return tok_identifier;
-    }
-}
-
+static Tokenizer *t;
 
 static void print_space(int num)
 {
@@ -144,9 +31,9 @@ ExprAST::~ExprAST() {}
 
 // Atoms
 class IntegerExprAST : public ExprAST {
-    long integer_;
+    int_t integer_;
 public:
-    IntegerExprAST(long integer) : integer_(integer) {}
+    IntegerExprAST(int_t integer) : integer_(integer) {}
     virtual llvm::Value *Codegen();
     void print_node() {
         print_space(indent);
@@ -485,14 +372,6 @@ llvm::Value *FileExprAST::Codegen() {
   return NULL;
 }
 
-/// CurTok/getNextToken - Provide a simple token buffer.  CurTok is the current
-/// token the parser is looking at.  getNextToken reads another token from the
-/// lexer and updates CurTok with its results.
-static int cur_tok;
-static int get_next_token()
-{
-    return cur_tok = gettok();
-}
 /// Error* - These are little helper functions for error handling.
 static ExprAST *error(const char *str)
 {
@@ -508,29 +387,29 @@ static ExprAST *parse_comp_eq();
 /// expr_atom ::= INTEGER
 static ExprAST *parse_atom() {
     ExprAST *result = NULL;
-    switch (cur_tok) {
-      case tok_integer:
-        result = new IntegerExprAST(integer_value); break;
-      case tok_string:
-        result = new StringExprAST(string_value); break;
-      case tok_identifier:
-        result = new IdentifierExprAST(identifier_value); break;
+    switch (t->cur_tok->type) {
+      case TOK_INTEGER:
+        result = new IntegerExprAST(t->cur_tok->val<int_t>()); break;
+      case TOK_STRING:
+        result = new StringExprAST(t->cur_tok->val<std::string>()); break;
+      case TOK_IDENTIFIER:
+        result = new IdentifierExprAST(t->cur_tok->val<std::string>()); break;
       default:
-        fprintf(stderr, "tok: %d\n", cur_tok);
+        std::cerr << "tok: " << t->cur_tok->c() << std::endl;
         return error("Error parsing atom");
     }
-    get_next_token();
+    t->get_next_token();
     return result;
 }
 
 static ExprAST *parse_lambda() {
     ExprAST *tuple = NULL, *func_type = NULL, *logical_or = NULL;
-    if (cur_tok == '(') {
+    if (t->cur_tok->c() == '(') {
         tuple = parse_tuple();
         if (!tuple) return NULL;
-        if (cur_tok != U'\u2192')
+        if (t->cur_tok->c() != 0x2192)
             return error("arrow expected");
-        get_next_token();
+        t->get_next_token();
         func_type = parse_func_type();
         if (!func_type) return NULL;
     } else {
@@ -545,8 +424,8 @@ static ExprAST *parse_lambda() {
 static ExprAST *parse_assign() {
     ExprAST *lambda = parse_lambda(), *lambda2 = NULL;
     if (!lambda) return NULL;
-    if (cur_tok == '=') {
-        get_next_token();
+    if (t->cur_tok->c() == '=') {
+        t->get_next_token();
         lambda2 = parse_lambda();
         if (!lambda2) return NULL;
     }
@@ -556,14 +435,14 @@ static ExprAST *parse_assign() {
 static ExprAST *parse_control() {
     ExprAST *expr1 = NULL, *expr2 = NULL, *expr3 = NULL;
     bool terniary = false;
-    if (cur_tok == '(' || cur_tok == tok_integer
-                       || cur_tok == tok_string
-                       || cur_tok == tok_identifier) {
+    if (t->cur_tok->c() == '(' || t->cur_tok->type == TOK_INTEGER
+                             || t->cur_tok->type == TOK_STRING
+                             || t->cur_tok->type == TOK_IDENTIFIER) {
         expr1 = parse_assign();
         if (!expr1) return NULL;
-        if (cur_tok == '?') {
+        if (t->cur_tok->c() == '?') {
             terniary = true;
-            get_next_token();
+            t->get_next_token();
         }
     }
     if (expr1 && !terniary) {
@@ -572,15 +451,15 @@ static ExprAST *parse_control() {
     if (!expr1) {
         expr1 = parse_assign();
         if (!expr1) return NULL;
-        if (cur_tok != '?')
+        if (t->cur_tok->c() != '?')
             return error("expected ternary operator");
-        get_next_token();
+        t->get_next_token();
     }
     expr2 = parse_expr();
     if (!expr2) return NULL;
-    if (cur_tok != ':')
+    if (t->cur_tok->c() != ':')
         return error("expected : from ternary operator");
-    get_next_token();
+    t->get_next_token();
     expr3 = parse_expr();
     if (!expr3) return NULL;
 
@@ -594,7 +473,7 @@ static ExprAST *parse_expr() {
 static ExprAST *parse_file() {
     std::vector<ExprAST *> exprs;
     ExprAST *expr = NULL;
-    while (cur_tok != tok_eof && (expr = parse_expr())) {
+    while (t->cur_tok->type != TOK_EOF && (expr = parse_expr())) {
         exprs.push_back(expr);
     }
     if (exprs.size()) {
@@ -610,8 +489,8 @@ static ExprAST *parse_list() {
     if (!expr) return NULL;
     exprs.push_back(expr);
 
-    while (cur_tok == ',') {
-        get_next_token();
+    while (t->cur_tok->c() == ',') {
+        t->get_next_token();
         expr = parse_expr();
         if (!expr) return NULL;
         exprs.push_back(expr);
@@ -620,24 +499,24 @@ static ExprAST *parse_list() {
 }
 
 static ExprAST *parse_array() {
-    get_next_token();  // eat [
+    t->get_next_token();  // eat [
     ExprAST *list = parse_list();
     if (!list) return NULL;
-    if (cur_tok != ']') {
+    if (t->cur_tok->c() != ']') {
         return error("no terminating ]");
     }
-    get_next_token();
+    t->get_next_token();
     return list;
 }
 
 static ExprAST *parse_tuple() {
-    get_next_token();  // eat [
+    t->get_next_token();  // eat [
     ExprAST *list = parse_list();
     if (!list) return NULL;
-    if (cur_tok != ')') {
+    if (t->cur_tok->c() != ')') {
         return error("no terminating )");
     }
-    get_next_token();
+    t->get_next_token();
     return list;
 }
 
@@ -645,8 +524,8 @@ static ExprAST *parse_tuple() {
 static ExprAST *parse_func_type() {
     ExprAST *atom = parse_atom(), *func_type = NULL;
     if (!atom) return NULL;
-    if (cur_tok == U'\u2192') {
-        get_next_token();
+    if (t->cur_tok->c() == 0x2192) {
+        t->get_next_token();
         func_type = parse_func_type();
     }
     return new FuncTypeExprAST(atom, func_type);
@@ -655,8 +534,8 @@ static ExprAST *parse_func_type() {
 static ExprAST *parse_apply() {
     ExprAST *func_type = parse_func_type(), *apply = NULL;
     if (!func_type) return NULL;
-    if (cur_tok == ' ') {
-        get_next_token();
+    if (t->cur_tok->c() == ' ') {
+        t->get_next_token();
         apply = parse_apply();
     }
     return new ApplyExprAST(func_type, apply);
@@ -665,9 +544,9 @@ static ExprAST *parse_apply() {
 static ExprAST *parse_unary() {
     bool underscore = false;
 
-    if (cur_tok == '_') {
+    if (t->cur_tok->c() == '_') {
         underscore = true;
-        get_next_token();
+        t->get_next_token();
     }
     ExprAST *apply = parse_apply();
     if (!apply) return NULL;
@@ -679,9 +558,9 @@ static ExprAST *parse_mul() {
     ExprAST *lhs = parse_unary(), *rhs = NULL;
     if (!lhs) return NULL;
 
-    if (cur_tok == '*' || cur_tok == '/' || cur_tok == '%') {
-        opcode = cur_tok;
-        get_next_token();
+    if (t->cur_tok->c() == '*' || t->cur_tok->c() == '/' || t->cur_tok->c() == '%') {
+        opcode = int(t->cur_tok->c());
+        t->get_next_token();
         rhs = parse_unary();
         if (!rhs) return NULL;
     }
@@ -693,9 +572,9 @@ static ExprAST *parse_add() {
     ExprAST *lhs = parse_mul(), *rhs = NULL;
     if (!lhs) return NULL;
 
-    if (cur_tok == '+' || cur_tok == '-') {
-        opcode = cur_tok;
-        get_next_token();
+    if (t->cur_tok->c() == '+' || t->cur_tok->c() == '-') {
+        opcode = int(t->cur_tok->c());
+        t->get_next_token();
         rhs = parse_mul();
         if (!rhs) return NULL;
     }
@@ -708,20 +587,20 @@ static ExprAST *parse_bit() {
     ExprAST *lhs = parse_add(), *rhs = NULL;
     if (!lhs) return NULL;
 
-    if (cur_tok == '|' || cur_tok == '^' || cur_tok == '&') {
-        opcode = cur_tok;
-        get_next_token();
+    if (t->cur_tok->c() == '|' || t->cur_tok->c() == '^' || t->cur_tok->c() == '&') {
+        opcode = int(t->cur_tok->c());
+        t->get_next_token();
         rhs = parse_add();
         if (!rhs) return NULL;
-    } else if (cur_tok == '<' || cur_tok == '>') {
-        opcode = cur_tok;
-        get_next_token();
-        if (cur_tok != opcode)
+    } else if (t->cur_tok->c() == '<' || t->cur_tok->c() == '>') {
+        opcode = int(t->cur_tok->c());
+        t->get_next_token();
+        if (int(t->cur_tok->c()) != opcode)
             return error("invalid operator");
-        get_next_token();
-        if (opcode == '>' && cur_tok == '>') {
+        t->get_next_token();
+        if (opcode == '>' && t->cur_tok->c() == '>') {
             signshift = true;
-            get_next_token();
+            t->get_next_token();
         }
         rhs = parse_add();
         if (!rhs) return NULL;
@@ -736,12 +615,12 @@ static ExprAST *parse_comp_lt() {
     ExprAST *lhs = parse_bit(), *rhs = NULL;
     if (!lhs) return NULL;
 
-    if (cur_tok == '<' || cur_tok == '>') {
-        opcode = cur_tok;
-        get_next_token();
-        if (cur_tok == '=') {
+    if (t->cur_tok->c() == '<' || t->cur_tok->c() == '>') {
+        opcode = int(t->cur_tok->c());
+        t->get_next_token();
+        if (t->cur_tok->c() == '=') {
             equal = true;
-            get_next_token();
+            t->get_next_token();
         }
         rhs = parse_bit();
         if (!rhs) return NULL;
@@ -755,13 +634,13 @@ static ExprAST *parse_comp_eq() {
     ExprAST *lhs = parse_comp_lt(), *rhs = NULL;
     if (!lhs) return NULL;
 
-    if (cur_tok == '=' || cur_tok == '!') {
-        opcode = cur_tok;
-        get_next_token();
-        if (cur_tok != '=') {
+    if (t->cur_tok->c() == '=' || t->cur_tok->c() == '!') {
+        opcode = int(t->cur_tok->c());
+        t->get_next_token();
+        if (t->cur_tok->c() != '=') {
             return NULL;
         }
-        get_next_token();
+        t->get_next_token();
         rhs = parse_bit();
         if (!rhs) return NULL;
     }
@@ -769,44 +648,34 @@ static ExprAST *parse_comp_eq() {
     return new CompEQExprAST(opcode, lhs, rhs);
 }
 
-static void driver() {
-    while (1) {
-        fprintf(stderr, "ready> ");
-        switch (cur_tok) {
-          case tok_eof:    return;
-          case ';':        get_next_token(); break;  // ignore top-level semicolons.
-          default:         parse_expr(); break;
-        }
-    }
-}
-
 int main(int argc, char *argv[])
 {
-    if (argc != 2) {
-        std::cerr << "No input file given" << std::endl;
-        return EXIT_FAILURE;
+    t = (argc == 1) ? new Tokenizer() : new Tokenizer(argv[1]);
+    if (!t->ok()) {
+        std::cerr << "File could not be opened" << std::endl;
+        exit(EXIT_FAILURE);
     }
-    std::ifstream in(argv[1]);
-    file = static_cast<const std::stringstream &>(std::stringstream() << in.rdbuf()).str();
 
-    bool test_lexer = false;
+    bool test_lexer = true;
     if (!test_lexer) {
-        get_next_token();
+        t->get_next_token();
         // driver();
         ExprAST *ast = parse_file();
         if (ast) ast->print_node();
     } else {
-        int token;
-        while ((token = gettok()) != tok_eof) {
-            if (token == tok_integer)
-                std::cout << "Integer: " << integer_value << std::endl;
-            else if (token == tok_string)
-                std::cout << "String: " << string_value << std::endl;
-            else if (token == tok_identifier)
-                std::cout << "Identifier: " << identifier_value << std::endl;
+        t->get_next_token();
+        while (t->cur_tok->type != TOK_EOF) {
+            if (t->cur_tok->type == TOK_INTEGER)
+                std::cout << "Integer: " << t->cur_tok->val<int_t>() << std::endl;
+            else if (t->cur_tok->type == TOK_STRING)
+                std::cout << "String: " << t->cur_tok->val<std::string>() << std::endl;
+            else if (t->cur_tok->type == TOK_IDENTIFIER)
+                std::cout << "Identifier: " << t->cur_tok->val<std::string>() << std::endl;
             else
-                std::cout << "Char: " << token << "/" << char(token) << std::endl;
+                std::cout << "Char: " << t->cur_tok->c() << "/" << char(t->cur_tok->c()) << std::endl;
+            t->get_next_token();
         }
     }
+    delete t;
     return 0;
 }
