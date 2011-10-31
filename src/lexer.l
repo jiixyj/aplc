@@ -5,7 +5,7 @@ NS   {NSND}|[0-9]
 %{
 #include <string>
 #include "node.h"
-#include "parser.hpp"
+#include "parser.cpp.h"
 #define SAVE_TOKEN yylval.string = new std::string(yytext, yyleng)
 #define TOKEN(t) (yylval.token = t)
 extern "C" int yywrap() { }

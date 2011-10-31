@@ -1,6 +1,6 @@
 #include <iostream>
 #include "node.h"
-#include "parser.hpp"
+#include "parser.cpp.h"
 
 extern ExpressionList* file;
 extern int yyparse();
