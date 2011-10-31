@@ -1,8 +1,11 @@
 PROG_CXX       = aplc
 GENERATED      = parser.cpp parser.h lexer.cpp
-SRCS           = ${GENERATED} main.cpp print.cpp extern.cpp
-CLEANFILES    += ${GENERATED} parser.c y.tab.h lexer.c
+SRCS           = ${GENERATED} main.cpp print.cpp
+CLEANFILES     = ${GENERATED} parser.c y.tab.h lexer.c
 NO_MAN         =
+
+BINDIR        ?= /bin
+DESTDIR       ?= /usr/local
 
 LLVM_CXXFLAGS != llvm-config --cxxflags
 LLVM_LDFLAGS  != llvm-config --ldflags
