@@ -59,7 +59,7 @@
 %start file
 
 %expect 4
-%glr-parser
+@BISON_GLR@
 
 %%
 
