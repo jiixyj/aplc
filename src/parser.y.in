@@ -22,8 +22,6 @@
 /* Represents the many different ways we can access our data */
 %union {
     NExpression *expr;
-    NTuple *tuple;
-    NArray *array;
     ExpressionList *exprvec;
     std::string *string;
     int token;
@@ -59,6 +57,12 @@
 %start file
 
 %expect 4
+/*
+%right TARROW TSPACE
+%right TASSIGN
+%right TQUES TCOL
+*/
+
 @BISON_GLR@
 
 %%
@@ -115,8 +119,8 @@ expr_add : expr_mul COMP_ADD expr_mul { $$ = new NBinaryOperator(*$1, $2, *$3); 
 expr_mul : expr_unary COMP_MUL expr_unary { $$ = new NBinaryOperator(*$1, $2, *$3); }
          | expr_unary
          ;
-
-expr_unary : TUNDER expr_apply { $$ = new NUnaryOperator(*$2); }
+/* FIXME: what is the unary operator for? */
+expr_unary : TUNDER expr_apply { $$ = $2; }
            | expr_apply
            ;
 
