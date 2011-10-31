@@ -2,20 +2,15 @@ find_package(LLVM REQUIRED)
 find_package(BISON REQUIRED)
 find_package(FLEX REQUIRED)
 
-if(${BISON_EXECUTABLE} MATCHES ".*bison")
-    set(BISON_GLR "%glr-parser")
-endif()
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/parser.y.in ${CMAKE_CURRENT_BINARY_DIR}/parser.y)
-
-
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(SYSTEM ${CMAKE_CURRENT_BINARY_DIR})
 include_directories(SYSTEM ${LLVM_INCLUDE_DIR})
 
-BISON_TARGET(MyParser ${CMAKE_CURRENT_BINARY_DIR}/parser.y ${CMAKE_CURRENT_BINARY_DIR}/parser.cpp
+BISON_TARGET(MyParser parser.y ${CMAKE_CURRENT_BINARY_DIR}/parser.cpp
              COMPILE_FLAGS "-v")
 FLEX_TARGET(MyScanner lexer.l  ${CMAKE_CURRENT_BINARY_DIR}/lexer.cpp)
 ADD_FLEX_BISON_DEPENDENCY(MyScanner MyParser)
+execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_BINARY_DIR}/parser.hpp ${CMAKE_CURRENT_BINARY_DIR}/parser.h)
 
 add_executable(aplc main print ${BISON_MyParser_OUTPUTS} ${FLEX_MyScanner_OUTPUTS})
 set_target_properties(aplc PROPERTIES
