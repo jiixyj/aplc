@@ -385,6 +385,7 @@ static ExprAST *error(const char *str)
 
 static ExprAST *parse_expr();
 static ExprAST *parse_tuple();
+static ExprAST *parse_array();
 static ExprAST *parse_func_type();
 static ExprAST *parse_comp_eq();
 
@@ -400,6 +401,11 @@ static ExprAST *parse_atom() {
       case TOK_IDENTIFIER:
         result = new IdentifierExprAST(t->cur_tok->val<std::string>()); break;
       default:
+        if (t->cur_tok->c() == '[') {
+            return parse_array();
+        } else if (t->cur_tok->c() == '(') {
+            return parse_tuple();
+        }
         std::cerr << "tok: " << t->cur_tok->c() << std::endl;
         return error("Error parsing atom");
     }

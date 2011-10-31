@@ -1,3 +1,3 @@
 putchar "Dein Name"
-[int] name = µ (ι #' ι == "\n" 0, | (ι, getchar), "")
+[int] name = µ (ι #' ι == "\n" 0, ¦ (ι, getchar), "")
 putchar ["Hallo ", name, "\n"]
