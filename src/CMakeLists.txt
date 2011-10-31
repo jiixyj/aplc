@@ -13,15 +13,11 @@ include_directories(SYSTEM ${CMAKE_CURRENT_BINARY_DIR})
 include_directories(SYSTEM ${LLVM_INCLUDE_DIR})
 
 BISON_TARGET(MyParser ${CMAKE_CURRENT_BINARY_DIR}/parser.y ${CMAKE_CURRENT_BINARY_DIR}/parser.cpp
-             COMPILE_FLAGS "-r solved")
+             COMPILE_FLAGS "-v")
 FLEX_TARGET(MyScanner lexer.l  ${CMAKE_CURRENT_BINARY_DIR}/lexer.cpp)
 ADD_FLEX_BISON_DEPENDENCY(MyScanner MyParser)
 
-add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/parser.cpp.h
-  COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_BINARY_DIR}/parser.hpp ${CMAKE_CURRENT_BINARY_DIR}/parser.cpp.h
-  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/parser.hpp)
-
-add_executable(aplc main print ${BISON_MyParser_OUTPUTS} ${FLEX_MyScanner_OUTPUTS} ${CMAKE_CURRENT_BINARY_DIR}/parser.cpp.h)
+add_executable(aplc main print ${BISON_MyParser_OUTPUTS} ${FLEX_MyScanner_OUTPUTS})
 set_target_properties(aplc PROPERTIES
   COMPILE_FLAGS ${LLVM_CFLAGS}
   LINK_FLAGS ${LLVM_LD_FLAGS})
