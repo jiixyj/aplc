@@ -11,11 +11,28 @@ class NExpression;
 
 typedef std::vector<NExpression *> ExpressionList;
 
+enum NodeId {
+    NIntegerId,
+    NIdentifierId,
+    NStringId,
+    NControlId,
+    NAssignId,
+    NLambdaId,
+    NComparisonOperatorId,
+    NBinaryOperatorId,
+    NUnaryOperatorId,
+    NApplyId,
+    NFuncTypeId,
+    NTupleId,
+    NArrayId
+};
+
 class NExpression {
 public:
     virtual ~NExpression() {}
     virtual llvm::Value* codeGen(CodeGenContext& context) {}
     virtual void print(std::stringstream &ss) = 0;
+    virtual NodeId getValueID() const = 0;
 };
 
 class NInteger : public NExpression {
@@ -24,6 +41,7 @@ public:
     NInteger(long long value) : value(value) {}
     virtual llvm::Value* codeGen(CodeGenContext& context) {}
     void print(std::stringstream &ss);
+    virtual NodeId getValueID() const { return NIntegerId; }
 };
 
 class NIdentifier : public NExpression {
@@ -32,6 +50,7 @@ public:
     NIdentifier(const std::string& name) : name(name) {}
     virtual llvm::Value* codeGen(CodeGenContext& context) {}
     void print(std::stringstream &ss);
+    virtual NodeId getValueID() const { return NIdentifierId; }
 };
 
 class NString : public NExpression {
@@ -40,6 +59,7 @@ public:
     NString(const std::string& name) : name(name) {}
     virtual llvm::Value* codeGen(CodeGenContext& context) {}
     void print(std::stringstream &ss);
+    virtual NodeId getValueID() const { return NStringId; }
 };
 
 class NControl : public NExpression {
@@ -50,6 +70,7 @@ public:
     NControl(NExpression& l, NExpression& m, NExpression& r) : l(l), m(m), r(r) {}
     virtual llvm::Value* codeGen(CodeGenContext& context) {}
     void print(std::stringstream &ss);
+    virtual NodeId getValueID() const { return NControlId; }
 };
 
 class NAssign : public NExpression {
@@ -59,6 +80,7 @@ public:
     NAssign(NExpression& l, NExpression& r) : l(l), r(r) {}
     virtual llvm::Value* codeGen(CodeGenContext& context) {}
     void print(std::stringstream &ss);
+    virtual NodeId getValueID() const { return NAssignId; }
 };
 
 class NLambda : public NExpression {
@@ -69,6 +91,7 @@ public:
     NLambda(NExpression& l, NExpression& m, NExpression& r) : l(l), m(m), r(r) {}
     virtual llvm::Value* codeGen(CodeGenContext& context) {}
     void print(std::stringstream &ss);
+    virtual NodeId getValueID() const { return NLambdaId; }
 };
 
 class NComparisonOperator : public NExpression {
@@ -78,6 +101,10 @@ public:
     NComparisonOperator(int op) : op(op) {}
     virtual llvm::Value* codeGen(CodeGenContext& context) {}
     void print(std::stringstream &ss);
+    virtual NodeId getValueID() const { return NComparisonOperatorId; }
+    static inline bool classof(const NExpression *b) {
+        b->getValueID() == NComparisonOperatorId;
+    }
 };
 
 class NBinaryOperator : public NExpression {
@@ -89,6 +116,7 @@ public:
         lhs(lhs), rhs(rhs), op(op) {}
     virtual llvm::Value* codeGen(CodeGenContext& context) {}
     void print(std::stringstream &ss);
+    virtual NodeId getValueID() const { return NBinaryOperatorId; }
 };
 
 class NUnaryOperator : public NExpression {
@@ -97,6 +125,7 @@ public:
     NUnaryOperator(NExpression& u) : u(u) {}
     virtual llvm::Value* codeGen(CodeGenContext& context) {}
     void print(std::stringstream &ss);
+    virtual NodeId getValueID() const { return NUnaryOperatorId; }
 };
 
 class NApply : public NExpression {
@@ -107,6 +136,7 @@ public:
         lhs(lhs), rhs(rhs) {}
     virtual llvm::Value* codeGen(CodeGenContext& context) {}
     void print(std::stringstream &ss);
+    virtual NodeId getValueID() const { return NApplyId; }
 };
 
 class NFuncType : public NExpression {
@@ -117,6 +147,7 @@ public:
         lhs(lhs), rhs(rhs) {}
     virtual llvm::Value* codeGen(CodeGenContext& context) {}
     void print(std::stringstream &ss);
+    virtual NodeId getValueID() const { return NFuncTypeId; }
 };
 
 class NTuple : public NExpression {
@@ -125,6 +156,10 @@ public:
     NTuple() {}
     virtual llvm::Value* codeGen(CodeGenContext& context) {}
     void print(std::stringstream &ss);
+    virtual NodeId getValueID() const { return NTupleId; }
+    static inline bool classof(const NExpression *b) {
+        b->getValueID() == NTupleId;
+    }
 };
 
 class NArray : public NExpression {
@@ -133,4 +168,8 @@ public:
     NArray() {}
     virtual llvm::Value* codeGen(CodeGenContext& context) {}
     void print(std::stringstream &ss);
+    virtual NodeId getValueID() const { return NArrayId; }
+    static inline bool classof(const NExpression *b) {
+        b->getValueID() == NArrayId;
+    }
 };
