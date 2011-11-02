@@ -1,5 +1,6 @@
 /* →  /xe2 /x86 /x92 */
-NSND [^0-9/\xe2,"\-\*\[\][:space:]?:=>|^&<+%_()]|\xe2[^\x86]|\xe2\x86[^\x92]
+/* λ  /xce /xbb */
+NSND [^0-9/\xe2\xce,"\-\*\[\][:space:]?:=>|^&<+%_()]|\xe2[^\x86]|\xe2\x86[^\x92]|\xce[^\xbb]
 NS   {NSND}|[0-9]
 
 %{
@@ -25,6 +26,7 @@ extern "C" int yywrap() { }
 [ ]*"?"[ ]*             return TOKEN(TQUES);
 [ ]*":"[ ]*             return TOKEN(TCOL);
 [ ]*"="[ ]*             return TOKEN(TASSIGN);
+[ ]*"λ"[ ]*             return TOKEN(TLAMBDA);
 [ ]*"→"[ ]*             return TOKEN(TARROW);
 [ ]*">>>"[ ]*           return TOKEN(TSHRS);
 [ ]*"||"[ ]*            return TOKEN(TCOR);

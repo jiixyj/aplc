@@ -33,7 +33,7 @@
    they represent.
  */
 %token <string> TIDENTIFIER TINTEGER TSTRING
-%token <token> TSPACE TARROW
+%token <token> TSPACE TLAMBDA TARROW
 %token <token> TQUES TCOL TASSIGN TSHRS TCOR TCXOR TCAND TCEQ TCNE TCLE TCGE
 %token <token> TSHR TSHL TCGT TCLT TOR TXOR TAND TPLUS TMINUS TMUL TDIV TMOD
 %token <token> TUNDER TLPAREN TRPAREN TLBRACK TRBRACK TCOMMA
@@ -57,7 +57,7 @@
 
 %start file
 
-%expect 4
+%expect 3
 /*
 %right TARROW TSPACE
 %right TASSIGN
@@ -83,7 +83,7 @@ expr_control : expr TQUES expr TCOL expr { $$ = new NControl(*$1, *$3, *$5); } ;
 
 expr_assign : expr_lambda TASSIGN expr_lambda { $$ = new NAssign(*$1, *$3); } ;
 
-expr_lambda : expr_tuple TARROW expr_func_type TSPACE expr { $$ = new NLambda(*$1, *$3, *$5); }
+expr_lambda : TLAMBDA expr_tuple TARROW expr_func_type TSPACE expr { $$ = new NLambda(*$2, *$4, *$6); }
             | expr_logical_or { $$ = clean($1); };
             ;
 
@@ -118,8 +118,8 @@ expr_add : expr_mul COMP_ADD expr_mul { $$ = new NBinaryOperator(*$1, $2, *$3); 
 expr_mul : expr_unary COMP_MUL expr_unary { $$ = new NBinaryOperator(*$1, $2, *$3); }
          | expr_unary
          ;
-/* FIXME: what is the unary operator for? */
-expr_unary : TUNDER expr_apply { $$ = $2; }
+
+expr_unary : TUNDER expr_apply { $$ = new NUnaryOperator(*$2); }
            | expr_apply
            ;
 
