@@ -1,5 +1,8 @@
 #include "node.h"
 
+static int indent_step = 2;
+static int indent;
+
 void NInteger::print(std::stringstream &ss) {
     indent += indent_step;
     ss << std::string(indent, ' ') << "Integer " << value << std::endl;

@@ -3,9 +3,6 @@
 #include <sstream>
 #include <llvm/Value.h>
 
-static int indent_step = 2;
-static int indent;
-
 class CodeGenContext;
 class NExpression;
 
