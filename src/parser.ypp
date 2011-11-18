@@ -87,16 +87,16 @@ expr_lambda : TLAMBDA expr_tuple TARROW expr_func_type TSPACE expr { $$ = new NL
             | expr_logical_or { $$ = clean($1); };
             ;
 
-expr_logical_or : expr_logical_xor { $$ = new NComparisonOperator(TCOR); llvm::dyn_cast<NComparisonOperator>($$)->l.push_back(clean($<expr>1)); }
-                | expr_logical_or TCOR expr_logical_xor { llvm::dyn_cast<NComparisonOperator>($1)->l.push_back(clean($<expr>3)); }
+expr_logical_or : expr_logical_xor { $$ = new NComparisonOperator(TCOR); llvm::cast<NComparisonOperator>($$)->l.push_back(clean($<expr>1)); }
+                | expr_logical_or TCOR expr_logical_xor { llvm::cast<NComparisonOperator>($1)->l.push_back(clean($<expr>3)); }
                 ;
 
-expr_logical_xor : expr_logical_and { $$ = new NComparisonOperator(TCXOR); llvm::dyn_cast<NComparisonOperator>($$)->l.push_back(clean($<expr>1)); }
-                 | expr_logical_xor TCXOR expr_logical_and { llvm::dyn_cast<NComparisonOperator>($1)->l.push_back(clean($<expr>3)); }
+expr_logical_xor : expr_logical_and { $$ = new NComparisonOperator(TCXOR); llvm::cast<NComparisonOperator>($$)->l.push_back(clean($<expr>1)); }
+                 | expr_logical_xor TCXOR expr_logical_and { llvm::cast<NComparisonOperator>($1)->l.push_back(clean($<expr>3)); }
                  ;
 
-expr_logical_and : expr_comp_eq { $$ = new NComparisonOperator(TCAND); llvm::dyn_cast<NComparisonOperator>($$)->l.push_back($<expr>1); }
-                 | expr_logical_and TCAND expr_comp_eq { llvm::dyn_cast<NComparisonOperator>($1)->l.push_back($<expr>3); }
+expr_logical_and : expr_comp_eq { $$ = new NComparisonOperator(TCAND); llvm::cast<NComparisonOperator>($$)->l.push_back($<expr>1); }
+                 | expr_logical_and TCAND expr_comp_eq { llvm::cast<NComparisonOperator>($1)->l.push_back($<expr>3); }
                  ;
 
 expr_comp_eq : expr_comp_lt COMP_EQ expr_comp_lt { $$ = new NBinaryOperator(*$1, $2, *$3); }
@@ -135,17 +135,17 @@ expr_list : expr { $$ = new ExpressionList; $$->push_back($<expr>1); }
           | expr_list TCOMMA expr { $1->push_back($<expr>3); }
           ;
 
-expr_tuple : TLPAREN expr_list TRPAREN { $$ = new NTuple; llvm::dyn_cast<NTuple>($$)->l = *$2; }
+expr_tuple : TLPAREN expr_list TRPAREN { $$ = new NTuple; llvm::cast<NTuple>($$)->l = *$2; }
            ;
 
-expr_array : TLBRACK expr_list TRBRACK { $$ = new NArray; llvm::dyn_cast<NArray>($$)->l = *$2; }
+expr_array : TLBRACK expr_list TRBRACK { $$ = new NArray; llvm::cast<NArray>($$)->l = *$2; }
            ;
 
 expr_atom : ident
           | integer
           | string
-          | expr_tuple { if (llvm::dyn_cast<NTuple>($1)->l.size() == 1) {
-                             $$ = llvm::dyn_cast<NTuple>($1)->l[0];
+          | expr_tuple { if (llvm::cast<NTuple>($1)->l.size() == 1) {
+                             $$ = llvm::cast<NTuple>($1)->l[0];
                          } }
           | expr_array
           ;
