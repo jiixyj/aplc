@@ -95,22 +95,22 @@ class NComparisonOperator : public NExpression {
 public:
     int op;
     ExpressionList l;
-    NComparisonOperator(int op) : op(op) {}
+    NComparisonOperator(int op) : op(op), l() {}
     virtual llvm::Value* codeGen(CodeGenContext& context) {}
     void print(std::stringstream &ss);
     virtual NodeId getValueID() const { return NComparisonOperatorId; }
     static inline bool classof(const NExpression *b) {
-        b->getValueID() == NComparisonOperatorId;
+        return b->getValueID() == NComparisonOperatorId;
     }
 };
 
 class NBinaryOperator : public NExpression {
 public:
-    int op;
     NExpression& lhs;
+    int op;
     NExpression& rhs;
     NBinaryOperator(NExpression& lhs, int op, NExpression& rhs) :
-        lhs(lhs), rhs(rhs), op(op) {}
+        lhs(lhs), op(op), rhs(rhs) {}
     virtual llvm::Value* codeGen(CodeGenContext& context) {}
     void print(std::stringstream &ss);
     virtual NodeId getValueID() const { return NBinaryOperatorId; }
@@ -155,7 +155,7 @@ public:
     void print(std::stringstream &ss);
     virtual NodeId getValueID() const { return NTupleId; }
     static inline bool classof(const NExpression *b) {
-        b->getValueID() == NTupleId;
+        return b->getValueID() == NTupleId;
     }
 };
 
@@ -167,6 +167,6 @@ public:
     void print(std::stringstream &ss);
     virtual NodeId getValueID() const { return NArrayId; }
     static inline bool classof(const NExpression *b) {
-        b->getValueID() == NArrayId;
+        return b->getValueID() == NArrayId;
     }
 };
