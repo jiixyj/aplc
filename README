@@ -1,0 +1,23 @@
+aplc
+====
+
+aplc is a LLVM based compiler for a simple APL dialect.
+
+
+Installation
+------------
+
+In the root folder, type:
+
+  $ autoreconf -is
+  $ mkdir build
+  $ cd build
+  $ ../configure
+  $ make
+  # make install
+
+
+Usage
+-----
+
+Pipe source code into aplc and view the syntax tree.
