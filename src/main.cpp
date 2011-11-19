@@ -1,15 +1,48 @@
 #include <iostream>
+#include <cstdlib>
+#include <cstdio>
+#include <cerrno>
+
+#include <unistd.h>
+
 #include "node.h"
 #include "parser.h"
 
 extern ExpressionList* file;
 extern int yyparse();
 extern int yylex();
+extern FILE *yyin;
+
+void usage(char *arg)
+{
+    std::cerr << "Usage: " << arg << " [-t] aplc" << std::endl;
+    std::exit(EXIT_FAILURE);
+}
 
 int main(int argc, char **argv)
 {
-    bool test_lexer = (argc == 2) ? std::string("true") == argv[1] : false;
-    if (test_lexer) {
+    int opt;
+    bool output_tokens = false;
+
+    while ((opt = getopt(argc, argv, "t")) != -1) {
+        switch (opt) {
+        case 't':
+            output_tokens = true;
+            break;
+        default:
+            usage(argv[0]);
+        }
+    }
+    if (argc != 2) { usage(argv[0]); }
+
+    if (std::strcmp(argv[1], "-")) {
+        if (errno = 0, !(yyin = std::fopen(argv[1], "r"))) {
+            perror(argv[1]);
+            std::exit(EXIT_FAILURE);
+        }
+    }
+
+    if (output_tokens) {
         int next_token;
         while ((next_token = yylex())) {
             switch (next_token) {
@@ -33,5 +66,10 @@ int main(int argc, char **argv)
             std::cout << ss.str();
         }
     }
+
+    if (errno = 0, std::fclose(yyin)) {
+        perror(argv[0]);
+    }
+
     return 0;
 }
