@@ -11,7 +11,9 @@ AC_PROG_CXX
 AM_PROG_LEX
 AC_PROG_YACC
 AC_CHECK_PROG(LLVM_CONFIG, llvm-config, llvm-config)
-if [[ -z "$LLVM_CONFIG" ]]; then AC_MSG_ERROR([Could not find llvm-config, quitting!]); fi
+if [[ -z "$LLVM_CONFIG" ]]; then
+    AC_MSG_ERROR([Could not find llvm-config, quitting!])
+fi
 
 # Checks for libraries.
 
