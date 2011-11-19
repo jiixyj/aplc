@@ -15,7 +15,7 @@ extern FILE *yyin;
 
 void usage(char *arg)
 {
-    std::cerr << "Usage: " << arg << " [-t] aplc" << std::endl;
+    std::cerr << "Usage: " << arg << " [-t] <file>" << std::endl;
     std::exit(EXIT_FAILURE);
 }
 
@@ -33,11 +33,11 @@ int main(int argc, char **argv)
             usage(argv[0]);
         }
     }
-    if (argc != 2) { usage(argv[0]); }
+    if (argc - optind != 1) { usage(argv[0]); }
 
-    if (std::strcmp(argv[1], "-")) {
-        if (errno = 0, !(yyin = std::fopen(argv[1], "r"))) {
-            perror(argv[1]);
+    if (std::strcmp(argv[optind], "-")) {
+        if (errno = 0, !(yyin = std::fopen(argv[optind], "r"))) {
+            perror(argv[optind]);
             std::exit(EXIT_FAILURE);
         }
     }
@@ -68,7 +68,7 @@ int main(int argc, char **argv)
     }
 
     if (errno = 0, std::fclose(yyin)) {
-        perror(argv[0]);
+        perror(argv[optind]);
     }
 
     return 0;
