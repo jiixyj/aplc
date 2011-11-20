@@ -14,6 +14,9 @@ AC_CHECK_PROG(LLVM_CONFIG, llvm-config, llvm-config)
 if [[ -z "$LLVM_CONFIG" ]]; then
     AC_MSG_ERROR([Could not find llvm-config, quitting!])
 fi
+AC_SUBST(LLVM_CPPFLAGS, [`llvm-config --cppflags`])
+AC_SUBST(LLVM_LDFLAGS, [`llvm-config --ldflags`])
+AC_SUBST(LLVM_LDADD, [`llvm-config --libs core`])
 
 # Checks for libraries.
 
