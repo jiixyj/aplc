@@ -7,6 +7,7 @@
 
 #include "node.h"
 #include "parser.h"
+#include "codegen.h"
 
 extern ExpressionList* file;
 extern int yyparse();
@@ -63,7 +64,8 @@ int main(int argc, char **argv)
             for (size_t i = 0; i < file->size(); ++i) {
                 (*file)[i]->print(ss);
             }
-            std::cout << ss.str();
+            std::cerr << ss.str();
+            generate_code(file);
         }
     }
 

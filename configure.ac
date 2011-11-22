@@ -16,7 +16,7 @@ if [[ -z "$LLVM_CONFIG" ]]; then
 fi
 AC_SUBST(LLVM_CPPFLAGS, [`llvm-config --cppflags`])
 AC_SUBST(LLVM_LDFLAGS, [`llvm-config --ldflags`])
-AC_SUBST(LLVM_LDADD, [`llvm-config --libs core`])
+AC_SUBST(LLVM_LDADD, [`llvm-config --libs`])
 
 # Checks for libraries.
 
