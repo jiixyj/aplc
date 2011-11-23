@@ -51,6 +51,9 @@ public:
     virtual llvm::Value* codeGen();
     void print(std::stringstream &ss);
     virtual NodeId getValueID() const { return NIdentifierId; }
+    static inline bool classof(const NExpression *b) {
+        return b->getValueID() == NIdentifierId;
+    }
 };
 
 class NString : public NExpression {
@@ -81,6 +84,9 @@ public:
     virtual llvm::Value* codeGen();
     void print(std::stringstream &ss);
     virtual NodeId getValueID() const { return NAssignId; }
+    static inline bool classof(const NExpression *b) {
+        return b->getValueID() == NAssignId;
+    }
 };
 
 class NLambda : public NExpression {
@@ -134,9 +140,12 @@ public:
     NExpression& rhs;
     NApply(NExpression& lhs, NExpression& rhs) :
         lhs(lhs), rhs(rhs) {}
-    virtual llvm::Value* codeGen() {}
+    virtual llvm::Value* codeGen();
     void print(std::stringstream &ss);
     virtual NodeId getValueID() const { return NApplyId; }
+    static inline bool classof(const NExpression *b) {
+        return b->getValueID() == NApplyId;
+    }
 };
 
 class NFuncType : public NExpression {
