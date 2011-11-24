@@ -2,6 +2,7 @@
 
 #include <map>
 
+#include <llvm/Constants.h>
 #include <llvm/DerivedTypes.h>
 #include <llvm/Function.h>
 #include <llvm/Transforms/Utils/Cloning.h>
@@ -15,6 +16,8 @@
 
 #include "node.h"
 #include "parser.h"
+
+using namespace llvm;
 
 llvm::Value *ErrorV(const char *str)
 {
@@ -180,6 +183,38 @@ llvm::Value *NIdentifier::codeGen() {
     }
 }
 
+llvm::Value *NTuple::codeGen() {
+    std::vector<llvm::Constant *> values;
+    std::vector<const llvm::Type *> types;
+    for (size_t i = 0; i < l.size(); ++i) {
+        llvm::Value *val = l[i]->codeGen();
+        if (!val) { return ErrorV("Bad Tuple"); }
+        if (!llvm::isa<llvm::Constant>(val)) { return ErrorV("Tuple elements must be constants"); }
+        values.push_back(llvm::cast<llvm::Constant>(val));
+        types.push_back(val->getType());
+    }
+    Constant *tuple = llvm::ConstantStruct::get(llvm::StructType::get(mod->getContext(), types, false), values);
+    GlobalVariable* gvar = new GlobalVariable(*mod, tuple->getType(), true, GlobalValue::PrivateLinkage, 0, "struct");
+    gvar->setInitializer(tuple);
+    return gvar;
+}
+
+llvm::Value *NArray::codeGen() {
+    std::vector<llvm::Constant *> values;
+    std::vector<const llvm::Type *> types;
+    for (size_t i = 0; i < l.size(); ++i) {
+        llvm::Value *val = l[i]->codeGen();
+        if (!val) { return ErrorV("Bad Tuple"); }
+        if (!llvm::isa<llvm::Constant>(val)) { return ErrorV("Tuple elements must be constants"); }
+        values.push_back(llvm::cast<llvm::Constant>(val));
+        types.push_back(val->getType());
+    }
+    Constant *array = llvm::ConstantArray::get(llvm::ArrayType::get(types[0], values.size()), values);
+    GlobalVariable* gvar = new GlobalVariable(*mod, array->getType(), true, GlobalValue::PrivateLinkage, 0, "array");
+    gvar->setInitializer(array);
+    return gvar;
+}
+
 llvm::Value *NBinaryOperator::codeGen() {
     llvm::Value *L = lhs.codeGen();
     llvm::Value *R = rhs.codeGen();
@@ -200,6 +235,43 @@ llvm::Value *NBinaryOperator::codeGen() {
     }
 
     return NULL;
+}
+
+static void print_value(llvm::Function *printf, llvm::Value *val) {
+    using namespace llvm;
+
+    static Value *format_int = builder.CreateGlobalStringPtr("%d");
+    static Value *format_str = builder.CreateGlobalStringPtr("%s");
+    static Value *format_newline = builder.CreateGlobalStringPtr("\n");
+    static Value *struct_beg = builder.CreateGlobalStringPtr("(");
+    static Value *struct_del = builder.CreateGlobalStringPtr(", ");
+    static Value *struct_end = builder.CreateGlobalStringPtr(")");
+    static Value *array_beg = builder.CreateGlobalStringPtr("[");
+    static Value *array_end = builder.CreateGlobalStringPtr("]");
+    if (val->getType()->isIntegerTy()) {
+        builder.CreateCall2(printf, format_int, val);
+    } else if (val->getType()->isPointerTy()) {
+        if (builder.CreateLoad(val)->getType()->isStructTy()) {
+            size_t size = cast<StructType>(builder.CreateLoad(val)->getType())->getNumElements();
+            builder.CreateCall(printf, struct_beg);
+            for (size_t i = 0; i < size; ++i) {
+                builder.CreateCall2(printf, format_int, builder.CreateLoad(builder.CreateStructGEP(val, i)));
+                if (i != size - 1) builder.CreateCall(printf, struct_del);
+            }
+            builder.CreateCall(printf, struct_end);
+        } else if (builder.CreateLoad(val)->getType()->isArrayTy()) {
+            size_t size = cast<ArrayType>(builder.CreateLoad(val)->getType())->getNumElements();
+            builder.CreateCall(printf, array_beg);
+            for (size_t i = 0; i < size; ++i) {
+                builder.CreateCall2(printf, format_int, builder.CreateLoad(builder.CreateStructGEP(val, i)));
+                if (i != size - 1) builder.CreateCall(printf, struct_del);
+            }
+            builder.CreateCall(printf, array_end);
+        }
+    } else {
+        return;
+    }
+    builder.CreateCall(printf, format_newline);
 }
 
 void generate_code(ExpressionList *exprs)
@@ -232,15 +304,14 @@ void generate_code(ExpressionList *exprs)
     builder.SetInsertPoint(bblock);
 
     // globals
-    Value *g_format_int = builder.CreateGlobalStringPtr("%d\n");
     named_values["ι"] = generate_identity();
 
 
     Value *last = NULL;
     for (size_t i = 0; i < exprs->size(); ++i) {
         last = (*exprs)[i]->codeGen();
-        if (!isa<NAssign>((*exprs)[i]) && last && last->getType()->isIntegerTy()) {
-            builder.CreateCall2(func_printf, g_format_int, last);
+        if (!isa<NAssign>((*exprs)[i]) && last) {
+            print_value(func_printf, last);
         }
     }
     builder.CreateRet(builder.getInt32(0));

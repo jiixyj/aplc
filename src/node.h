@@ -163,7 +163,7 @@ class NTuple : public NExpression {
 public:
     ExpressionList l;
     NTuple() {}
-    virtual llvm::Value* codeGen() {}
+    virtual llvm::Value* codeGen();
     void print(std::stringstream &ss);
     virtual NodeId getValueID() const { return NTupleId; }
     static inline bool classof(const NExpression *b) {
@@ -175,7 +175,7 @@ class NArray : public NExpression {
 public:
     ExpressionList l;
     NArray() {}
-    virtual llvm::Value* codeGen() {}
+    virtual llvm::Value* codeGen();
     void print(std::stringstream &ss);
     virtual NodeId getValueID() const { return NArrayId; }
     static inline bool classof(const NExpression *b) {
