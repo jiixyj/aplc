@@ -201,18 +201,33 @@ llvm::Value *NTuple::codeGen() {
 
 llvm::Value *NArray::codeGen() {
     std::vector<llvm::Constant *> values;
-    std::vector<const llvm::Type *> types;
+    const llvm::Type *type = NULL;
     for (size_t i = 0; i < l.size(); ++i) {
         llvm::Value *val = l[i]->codeGen();
         if (!val) { return ErrorV("Bad Tuple"); }
-        if (!llvm::isa<llvm::Constant>(val)) { return ErrorV("Tuple elements must be constants"); }
+        if (!llvm::isa<llvm::Constant>(val)) return ErrorV("Tuple elements must be constants");
         values.push_back(llvm::cast<llvm::Constant>(val));
-        types.push_back(val->getType());
+        if (i == 0) type = val->getType();
+        else if (val->getType() != type) return ErrorV("Types of array elements must be the same");
     }
-    Constant *array = llvm::ConstantArray::get(llvm::ArrayType::get(types[0], values.size()), values);
-    GlobalVariable* gvar = new GlobalVariable(*mod, array->getType(), true, GlobalValue::PrivateLinkage, 0, "array");
-    gvar->setInitializer(array);
-    return gvar;
+    std::vector<const llvm::Type *> types;
+    const Type *size = builder.getInt64Ty();
+    const ArrayType *array = llvm::ArrayType::get(type, values.size());
+    types.push_back(size);
+    types.push_back(array);
+    const Type *array_real = llvm::StructType::get(mod->getContext(), types, false);
+    Constant *alloca_size = ConstantExpr::getSizeOf(array_real);
+
+    types[1] = llvm::ArrayType::get(type, 0);
+    const Type *array_type = llvm::StructType::get(mod->getContext(), types, false);
+
+    Value *mem = builder.CreateAlloca(builder.getInt8Ty(), alloca_size);
+    Value *ret = builder.CreateBitCast(mem, PointerType::getUnqual(array_type));
+
+    builder.CreateStore(builder.getInt64(values.size()), builder.CreateStructGEP(ret, 0));
+    builder.CreateStore(ConstantArray::get(array, values), builder.CreateBitCast(builder.CreateStructGEP(ret, 1), PointerType::getUnqual(array)));
+
+    return ret;
 }
 
 llvm::Value *NBinaryOperator::codeGen() {
@@ -251,7 +266,20 @@ static void print_value(llvm::Function *printf, llvm::Value *val) {
     if (val->getType()->isIntegerTy()) {
         builder.CreateCall2(printf, format_int, val);
     } else if (val->getType()->isPointerTy()) {
-        if (builder.CreateLoad(val)->getType()->isStructTy()) {
+        if (builder.CreateLoad(val)->getType()->isStructTy() &&
+                cast<StructType>(builder.CreateLoad(val)->getType())->getNumElements() == 2 &&
+                 isa<ArrayType>(builder.CreateLoad(builder.CreateStructGEP(val, 1))->getType()) &&
+                cast<ArrayType>(builder.CreateLoad(builder.CreateStructGEP(val, 1))->getType())->getNumElements() == 0) {
+            Value *array_size = builder.CreateLoad(builder.CreateStructGEP(val, 0));
+            Value *array_data = builder.CreateStructGEP(val, 1);
+
+            builder.CreateCall(printf, array_beg);
+            for (size_t i = 0; i < 2; ++i) {
+                builder.CreateCall2(printf, format_int, builder.CreateLoad(builder.CreateStructGEP(array_data, i)));
+                if (i != 2 - 1) builder.CreateCall(printf, struct_del);
+            }
+            builder.CreateCall(printf, array_end);
+        } else if (builder.CreateLoad(val)->getType()->isStructTy()) {
             size_t size = cast<StructType>(builder.CreateLoad(val)->getType())->getNumElements();
             builder.CreateCall(printf, struct_beg);
             for (size_t i = 0; i < size; ++i) {
@@ -259,14 +287,6 @@ static void print_value(llvm::Function *printf, llvm::Value *val) {
                 if (i != size - 1) builder.CreateCall(printf, struct_del);
             }
             builder.CreateCall(printf, struct_end);
-        } else if (builder.CreateLoad(val)->getType()->isArrayTy()) {
-            size_t size = cast<ArrayType>(builder.CreateLoad(val)->getType())->getNumElements();
-            builder.CreateCall(printf, array_beg);
-            for (size_t i = 0; i < size; ++i) {
-                builder.CreateCall2(printf, format_int, builder.CreateLoad(builder.CreateStructGEP(val, i)));
-                if (i != size - 1) builder.CreateCall(printf, struct_del);
-            }
-            builder.CreateCall(printf, array_end);
         }
     } else {
         return;
