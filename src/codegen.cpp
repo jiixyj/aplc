@@ -36,7 +36,7 @@ namespace llvm {
 struct UnresolvedType : public Type {
     int x;
     UnresolvedType(int x) : Type(mod->getContext(), NumTypeIDs), x(x) {}
-    static const UnresolvedType *get(int x) {
+    static UnresolvedType *get(int x) {
         UnresolvedType *ret = unresolved_type_map[x];
         if (!ret) {
             ret = unresolved_type_map[x] = new UnresolvedType(x);
@@ -54,9 +54,7 @@ llvm::Function *generate_identity()
 {
     using namespace llvm;
 
-    std::vector<const Type *> func_ident_args;
-    func_ident_args.push_back(UnresolvedType::get(0));
-    FunctionType *func_ident_type = FunctionType::get(UnresolvedType::get(0), func_ident_args, false);
+    FunctionType *func_ident_type = FunctionType::get(UnresolvedType::get(0), UnresolvedType::get(0), false);
     Function *func_ident = Function::Create(func_ident_type, GlobalValue::InternalLinkage, "ι");
 
     BasicBlock *block_ident = BasicBlock::Create(mod->getContext(), "entry", func_ident, 0);
@@ -110,11 +108,11 @@ static bool is_resolved(llvm::Function *F)
     return true;
 }
 
-static llvm::Function *replace_unresolved(llvm::Function *F, int index, const llvm::Type *type, bool put_in_module)
+static llvm::Function *replace_unresolved(llvm::Function *F, int index, llvm::Type *type, bool put_in_module)
 {
     using namespace llvm;
 
-    std::vector<const Type*> ArgTypes;
+    std::vector<Type*> ArgTypes;
     for (Function::arg_iterator I = F->arg_begin(), E = F->arg_end();
         I != E; ++I) {
         const UnresolvedType *t;
@@ -126,7 +124,7 @@ static llvm::Function *replace_unresolved(llvm::Function *F, int index, const ll
     }
 
     // Create a new function type...
-    const Type *ret_type = F->getFunctionType()->getReturnType();
+    Type *ret_type = F->getFunctionType()->getReturnType();
     if (llvm::isa<UnresolvedType>(ret_type) && llvm::cast<UnresolvedType>(ret_type)->x == index) {
         ret_type = type;
     }
@@ -135,7 +133,7 @@ static llvm::Function *replace_unresolved(llvm::Function *F, int index, const ll
     // Create the new function...
     Function *NewF = Function::Create(FTy, F->getLinkage(), F->getName(), put_in_module ? mod : NULL);
 
-    ValueMap<const Value *, Value *> vmap;
+    ValueToValueMapTy vmap;
     Function::arg_iterator DestI = NewF->arg_begin();
     for (Function::const_arg_iterator I = F->arg_begin(), E = F->arg_end(); I != E; ++I) {
         DestI->setName(I->getName());
@@ -185,7 +183,7 @@ llvm::Value *NIdentifier::codeGen() {
 
 llvm::Value *NTuple::codeGen() {
     std::vector<llvm::Constant *> values;
-    std::vector<const llvm::Type *> types;
+    std::vector<llvm::Type *> types;
     for (size_t i = 0; i < l.size(); ++i) {
         llvm::Value *val = l[i]->codeGen();
         if (!val) { return ErrorV("Bad Tuple"); }
@@ -201,7 +199,7 @@ llvm::Value *NTuple::codeGen() {
 
 llvm::Value *NArray::codeGen() {
     std::vector<llvm::Constant *> values;
-    const llvm::Type *type = NULL;
+    llvm::Type *type = NULL;
     for (size_t i = 0; i < l.size(); ++i) {
         llvm::Value *val = l[i]->codeGen();
         if (!val) { return ErrorV("Bad Tuple"); }
@@ -210,16 +208,16 @@ llvm::Value *NArray::codeGen() {
         if (i == 0) type = val->getType();
         else if (val->getType() != type) return ErrorV("Types of array elements must be the same");
     }
-    std::vector<const llvm::Type *> types;
-    const Type *size = builder.getInt64Ty();
-    const ArrayType *array = llvm::ArrayType::get(type, values.size());
+    std::vector<llvm::Type *> types;
+    Type *size = builder.getInt64Ty();
+    ArrayType *array = llvm::ArrayType::get(type, values.size());
     types.push_back(size);
     types.push_back(array);
-    const Type *array_real = llvm::StructType::get(mod->getContext(), types, false);
+    Type *array_real = llvm::StructType::get(mod->getContext(), types, false);
     Constant *alloca_size = ConstantExpr::getSizeOf(array_real);
 
     types[1] = llvm::ArrayType::get(type, 0);
-    const Type *array_type = llvm::StructType::get(mod->getContext(), types, false);
+    Type *array_type = llvm::StructType::get(mod->getContext(), types, false);
 
     Value *mem = builder.CreateAlloca(builder.getInt8Ty(), alloca_size);
     Value *ret = builder.CreateBitCast(mem, PointerType::getUnqual(array_type));
@@ -307,14 +305,14 @@ void generate_code(ExpressionList *exprs)
     PointerType* char_ptr_ptr = PointerType::get(char_ptr, 0);
 
     // main
-    std::vector<const Type *> func_main_args;
+    std::vector<Type *> func_main_args;
     func_main_args.push_back(IntegerType::get(mod->getContext(), 32));
     func_main_args.push_back(char_ptr_ptr);
     FunctionType* func_main_type = FunctionType::get(IntegerType::get(mod->getContext(), 32), func_main_args, false);
     Function *func_main = Function::Create(func_main_type, GlobalValue::ExternalLinkage, "main", mod);
 
     // printf
-    std::vector<const Type *> func_printf_args;
+    std::vector<Type *> func_printf_args;
     func_printf_args.push_back(char_ptr);
     FunctionType *func_printf_type = FunctionType::get(IntegerType::get(mod->getContext(), 32), func_printf_args, true);
     Function *func_printf = Function::Create(func_printf_type, GlobalValue::ExternalLinkage, "printf", mod);
