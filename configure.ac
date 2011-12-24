@@ -1,4 +1,4 @@
-AC_PREREQ([2.68])
+AC_PREREQ([2.67])
 AC_INIT(aplc, 0.0.1)
 AC_CONFIG_SRCDIR([src/main.cpp])
 AM_INIT_AUTOMAKE

@@ -50,11 +50,15 @@ struct UnresolvedType : public Type {
 };
 }
 
+#ifndef LLVM_TRANSFORMS_UTILS_VALUEMAPPER_H
+#define Type const Type
+#endif
+
 llvm::Function *generate_identity()
 {
-    using namespace llvm;
-
-    FunctionType *func_ident_type = FunctionType::get(UnresolvedType::get(0), UnresolvedType::get(0), false);
+    std::vector<Type *> func_ident_args;
+    func_ident_args.push_back(UnresolvedType::get(0));
+    FunctionType *func_ident_type = FunctionType::get(UnresolvedType::get(0), func_ident_args, false);
     Function *func_ident = Function::Create(func_ident_type, GlobalValue::InternalLinkage, "ι");
 
     BasicBlock *block_ident = BasicBlock::Create(mod->getContext(), "entry", func_ident, 0);
@@ -93,14 +97,14 @@ llvm::Value *NAssign::codeGen() {
 
 static bool is_resolved(llvm::Function *F)
 {
-    std::vector<const llvm::Type*> ArgTypes;
+    std::vector<Type *> ArgTypes;
     for (llvm::Function::arg_iterator I = F->arg_begin(), E = F->arg_end();
         I != E; ++I) {
         if (llvm::isa<llvm::UnresolvedType>(I->getType())) {
             return false;
         }
     }
-    const llvm::Type *ret_type = F->getFunctionType()->getReturnType();
+    Type *ret_type = F->getFunctionType()->getReturnType();
     if (llvm::isa<llvm::UnresolvedType>(ret_type)) {
         return false;
     }
@@ -108,9 +112,8 @@ static bool is_resolved(llvm::Function *F)
     return true;
 }
 
-static llvm::Function *replace_unresolved(llvm::Function *F, int index, llvm::Type *type, bool put_in_module)
+static llvm::Function *replace_unresolved(llvm::Function *F, int index, Type *type, bool put_in_module)
 {
-    using namespace llvm;
 
     std::vector<Type*> ArgTypes;
     for (Function::arg_iterator I = F->arg_begin(), E = F->arg_end();
@@ -133,6 +136,9 @@ static llvm::Function *replace_unresolved(llvm::Function *F, int index, llvm::Ty
     // Create the new function...
     Function *NewF = Function::Create(FTy, F->getLinkage(), F->getName(), put_in_module ? mod : NULL);
 
+#ifndef LLVM_TRANSFORMS_UTILS_VALUEMAPPER_H
+    typedef llvm::DenseMap<const llvm::Value*, llvm::Value*, llvm::DenseMapInfo<const llvm::Value*> > ValueToValueMapTy;
+#endif
     ValueToValueMapTy vmap;
     Function::arg_iterator DestI = NewF->arg_begin();
     for (Function::const_arg_iterator I = F->arg_begin(), E = F->arg_end(); I != E; ++I) {
@@ -140,14 +146,17 @@ static llvm::Function *replace_unresolved(llvm::Function *F, int index, llvm::Ty
         vmap[I] = DestI++;
     }
     SmallVectorImpl<ReturnInst *> ri(0);
-    CloneFunctionInto(NewF, F, vmap, false, ri);
+    CloneFunctionInto(NewF, F, vmap,
+#ifdef LLVM_TRANSFORMS_UTILS_VALUEMAPPER_H
+            false,
+#endif
+    ri);
 
     return NewF;
 }
 
 
 llvm::Value *NApply::codeGen() {
-    using namespace llvm;
 
     llvm::Value *func = lhs.codeGen();
     llvm::Value *apply = rhs.codeGen();
@@ -170,7 +179,7 @@ llvm::Value *NApply::codeGen() {
 }
 
 llvm::Value *NInteger::codeGen() {
-    return builder.getInt64(value);
+    return ConstantInt::get(builder.getInt64Ty(), value);
 }
 
 llvm::Value *NIdentifier::codeGen() {
@@ -182,8 +191,8 @@ llvm::Value *NIdentifier::codeGen() {
 }
 
 llvm::Value *NTuple::codeGen() {
-    std::vector<llvm::Constant *> values;
-    std::vector<llvm::Type *> types;
+    std::vector<Constant *> values;
+    std::vector<Type *> types;
     for (size_t i = 0; i < l.size(); ++i) {
         llvm::Value *val = l[i]->codeGen();
         if (!val) { return ErrorV("Bad Tuple"); }
@@ -198,39 +207,39 @@ llvm::Value *NTuple::codeGen() {
 }
 
 llvm::Value *NArray::codeGen() {
-    std::vector<llvm::Constant *> values;
-    llvm::Type *type = NULL;
+    std::vector<Constant *> values;
+    Type *type = NULL;
     for (size_t i = 0; i < l.size(); ++i) {
-        llvm::Value *val = l[i]->codeGen();
+        Value *val = l[i]->codeGen();
         if (!val) { return ErrorV("Bad Tuple"); }
-        if (!llvm::isa<llvm::Constant>(val)) return ErrorV("Tuple elements must be constants");
-        values.push_back(llvm::cast<llvm::Constant>(val));
+        if (!isa<Constant>(val)) return ErrorV("Tuple elements must be constants");
+        values.push_back(cast<Constant>(val));
         if (i == 0) type = val->getType();
         else if (val->getType() != type) return ErrorV("Types of array elements must be the same");
     }
-    std::vector<llvm::Type *> types;
+    std::vector<Type *> types;
     Type *size = builder.getInt64Ty();
-    ArrayType *array = llvm::ArrayType::get(type, values.size());
+    ArrayType *array = ArrayType::get(type, values.size());
     types.push_back(size);
     types.push_back(array);
-    Type *array_real = llvm::StructType::get(mod->getContext(), types, false);
+    Type *array_real = StructType::get(mod->getContext(), types, false);
     Constant *alloca_size = ConstantExpr::getSizeOf(array_real);
 
-    types[1] = llvm::ArrayType::get(type, 0);
-    Type *array_type = llvm::StructType::get(mod->getContext(), types, false);
+    types[1] = ArrayType::get(type, 0);
+    Type *array_type = StructType::get(mod->getContext(), types, false);
 
     Value *mem = builder.CreateAlloca(builder.getInt8Ty(), alloca_size);
     Value *ret = builder.CreateBitCast(mem, PointerType::getUnqual(array_type));
 
-    builder.CreateStore(builder.getInt64(values.size()), builder.CreateStructGEP(ret, 0));
+    builder.CreateStore(ConstantInt::get(builder.getInt64Ty(), values.size()), builder.CreateStructGEP(ret, 0));
     builder.CreateStore(ConstantArray::get(array, values), builder.CreateBitCast(builder.CreateStructGEP(ret, 1), PointerType::getUnqual(array)));
 
     return ret;
 }
 
 llvm::Value *NBinaryOperator::codeGen() {
-    llvm::Value *L = lhs.codeGen();
-    llvm::Value *R = rhs.codeGen();
+    Value *L = lhs.codeGen();
+    Value *R = rhs.codeGen();
     if (L == 0 || R == 0) return NULL;
 
     switch (op) {
@@ -251,7 +260,6 @@ llvm::Value *NBinaryOperator::codeGen() {
 }
 
 static void print_value(llvm::Function *printf, llvm::Value *val) {
-    using namespace llvm;
 
     static Value *format_int = builder.CreateGlobalStringPtr("%d");
     static Value *format_str = builder.CreateGlobalStringPtr("%s");
@@ -294,7 +302,6 @@ static void print_value(llvm::Function *printf, llvm::Value *val) {
 
 void generate_code(ExpressionList *exprs)
 {
-    using namespace llvm;
 
     mod = new Module("main", getGlobalContext());
 
@@ -332,7 +339,7 @@ void generate_code(ExpressionList *exprs)
             print_value(func_printf, last);
         }
     }
-    builder.CreateRet(builder.getInt32(0));
+    builder.CreateRet(ConstantInt::get(builder.getInt32Ty(), 0));
 
     std::cerr << "Code is generated." << std::endl;
     PassManager pm;
