@@ -88,6 +88,7 @@ llvm::Function *generate_putchar()
 
 llvm::Value *NAssign::codeGen() {
     last_ident = "";
+    l.codeGen();
     if (last_ident == "") {
         return ErrorV("Identifier expected");
     }
@@ -334,7 +335,7 @@ void generate_code(ExpressionList *exprs)
     mod = new Module("main", getGlobalContext());
 
     // main
-    Type *func_main_args[] = { IntegerType::get(mod->getContext(), 32), PointerType::get(builder.getInt8PtrTy(), 0) };
+    Type *func_main_args[] = { builder.getInt32Ty(), PointerType::get(builder.getInt8PtrTy(), 0) };
     FunctionType* func_main_type = FunctionType::get(builder.getInt32Ty(), func_main_args, false);
     Function *func_main = Function::Create(func_main_type, GlobalValue::ExternalLinkage, "main", mod);
 
