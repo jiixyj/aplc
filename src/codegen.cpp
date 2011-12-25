@@ -53,10 +53,6 @@ struct UnresolvedType : public Type {
 };
 }
 
-#ifndef LLVM_TRANSFORMS_UTILS_VALUEMAPPER_H
-#define Type const Type
-#endif
-
 llvm::Function *generate_identity()
 {
     std::vector<Type *> func_args;
@@ -72,7 +68,7 @@ llvm::Function *generate_identity()
     return func;
 }
 
-llvm::Function *generate_putchar(Function *printf)
+llvm::Function *generate_putchar()
 {
     std::vector<Type *> func_args;
     func_args.push_back(builder.getInt64Ty());
@@ -84,7 +80,7 @@ llvm::Function *generate_putchar(Function *printf)
     builder.SetInsertPoint(block);
 
     static Value* const_ptr_12 = builder.CreateGlobalStringPtr("%c");
-    builder.CreateCall2(printf, const_ptr_12, func->arg_begin());
+    builder.CreateCall2(named_values["__printf"], const_ptr_12, func->arg_begin());
     builder.CreateRetVoid();
 
     return func;
@@ -92,7 +88,6 @@ llvm::Function *generate_putchar(Function *printf)
 
 llvm::Value *NAssign::codeGen() {
     last_ident = "";
-    Value *decl = l.codeGen();
     if (last_ident == "") {
         return ErrorV("Identifier expected");
     }
@@ -127,7 +122,6 @@ static bool is_resolved(llvm::Function *F)
 
 static llvm::Function *replace_unresolved(llvm::Function *F, int index, Type *type, bool put_in_module)
 {
-
     std::vector<Type*> ArgTypes;
     for (Function::arg_iterator I = F->arg_begin(), E = F->arg_end();
         I != E; ++I) {
@@ -149,9 +143,6 @@ static llvm::Function *replace_unresolved(llvm::Function *F, int index, Type *ty
     // Create the new function...
     Function *NewF = Function::Create(FTy, F->getLinkage(), F->getName(), put_in_module ? mod : NULL);
 
-#ifndef LLVM_TRANSFORMS_UTILS_VALUEMAPPER_H
-    typedef llvm::DenseMap<const llvm::Value*, llvm::Value*, llvm::DenseMapInfo<const llvm::Value*> > ValueToValueMapTy;
-#endif
     ValueToValueMapTy vmap;
     Function::arg_iterator DestI = NewF->arg_begin();
     for (Function::const_arg_iterator I = F->arg_begin(), E = F->arg_end(); I != E; ++I) {
@@ -159,11 +150,7 @@ static llvm::Function *replace_unresolved(llvm::Function *F, int index, Type *ty
         vmap[I] = DestI++;
     }
     SmallVectorImpl<ReturnInst *> ri(0);
-    CloneFunctionInto(NewF, F, vmap,
-#ifdef LLVM_TRANSFORMS_UTILS_VALUEMAPPER_H
-            false,
-#endif
-    ri);
+    CloneFunctionInto(NewF, F, vmap, false, ri);
 
     return NewF;
 }
@@ -242,11 +229,8 @@ llvm::Value *NArray::codeGen() {
         if (i == 0) type = val->getType();
         else if (val->getType() != type) return ErrorV("Types of array elements must be the same");
     }
-    std::vector<Type *> types;
-    Type *size = builder.getInt64Ty();
     ArrayType *array = ArrayType::get(type, values.size());
-    types.push_back(size);
-    types.push_back(array);
+    Type *types[] = { builder.getInt64Ty(), array };
     Type *array_real = StructType::get(mod->getContext(), types, false);
     Constant *alloca_size = ConstantExpr::getSizeOf(array_real);
 
@@ -256,7 +240,7 @@ llvm::Value *NArray::codeGen() {
     Value *mem = builder.CreateAlloca(builder.getInt8Ty(), builder.CreateIntCast(alloca_size, builder.getInt32Ty(), false));
     Value *ret = builder.CreateBitCast(mem, PointerType::getUnqual(array_type));
 
-    builder.CreateStore(ConstantInt::get(builder.getInt64Ty(), values.size()), builder.CreateStructGEP(ret, 0));
+    builder.CreateStore(builder.getInt64(values.size()), builder.CreateStructGEP(ret, 0));
     builder.CreateStore(ConstantArray::get(array, values), builder.CreateBitCast(builder.CreateStructGEP(ret, 1), PointerType::getUnqual(array)));
 
     return ret;
@@ -294,21 +278,41 @@ static void print_value(llvm::Function *printf, llvm::Value *val)
     static Value *struct_end = builder.CreateGlobalStringPtr(")");
     static Value *array_beg = builder.CreateGlobalStringPtr("[");
     static Value *array_end = builder.CreateGlobalStringPtr("]");
+
+    PointerType *tmp1;
     if (val->getType()->isIntegerTy()) {
         builder.CreateCall2(printf, format_int, val);
-    } else if (val->getType()->isPointerTy()) {
-        if (builder.CreateLoad(val)->getType()->isStructTy() &&
-                cast<StructType>(builder.CreateLoad(val)->getType())->getNumElements() == 2 &&
-                 isa<ArrayType>(builder.CreateLoad(builder.CreateStructGEP(val, 1))->getType()) &&
-                cast<ArrayType>(builder.CreateLoad(builder.CreateStructGEP(val, 1))->getType())->getNumElements() == 0) {
+    } else if ((tmp1 = dyn_cast<PointerType>(val->getType()))) {
+        ArrayType *tmp2;
+        if (tmp1->getElementType()->isStructTy() &&
+                tmp1->getElementType()->getNumContainedTypes() == 2 &&
+                (tmp2 = dyn_cast<ArrayType>(tmp1->getElementType()->getContainedType(1))) &&
+                tmp2->getNumElements() == 0) {
             Value *array_size = builder.CreateLoad(builder.CreateStructGEP(val, 0));
             Value *array_data = builder.CreateStructGEP(val, 1);
 
             builder.CreateCall(printf, array_beg);
-            for (size_t i = 0; i < 2; ++i) {
-                builder.CreateCall2(printf, format_int, builder.CreateLoad(builder.CreateStructGEP(array_data, i)));
-                if (i != 2 - 1) builder.CreateCall(printf, struct_del);
-            }
+
+            BasicBlock* label_loop =        BasicBlock::Create(mod->getContext(), "", builder.GetInsertBlock()->getParent(), 0);
+            BasicBlock* label_loop_exit =   BasicBlock::Create(mod->getContext(), "", builder.GetInsertBlock()->getParent(), 0);
+
+            builder.CreateBr(label_loop);
+            BasicBlock* old = builder.GetInsertBlock();
+            builder.SetInsertPoint(label_loop);
+
+            // Block  (label_loop)
+            PHINode* indvar = builder.CreatePHI(builder.getInt64Ty(), 2);
+            indvar->addIncoming(builder.getInt64(0), old);
+
+            Value *Idxs[] = { builder.getInt64(0), indvar };
+            builder.CreateCall2(printf, format_int, builder.CreateLoad(builder.CreateGEP(array_data, ArrayRef<Value *>(Idxs))));
+            builder.CreateCall(printf, struct_del);
+
+            Value* nextindvar = builder.CreateBinOp(Instruction::Add, indvar, builder.getInt64(1));
+            indvar->addIncoming(nextindvar, label_loop);
+            builder.CreateCondBr(builder.CreateICmpEQ(nextindvar, array_size), label_loop_exit, label_loop);
+            builder.SetInsertPoint(label_loop_exit);
+
             builder.CreateCall(printf, array_end);
         } else if (builder.CreateLoad(val)->getType()->isStructTy()) {
             size_t size = cast<StructType>(builder.CreateLoad(val)->getType())->getNumElements();
@@ -329,41 +333,31 @@ void generate_code(ExpressionList *exprs)
 {
     mod = new Module("main", getGlobalContext());
 
-    // char *
-    PointerType* char_ptr = PointerType::get(IntegerType::get(mod->getContext(), 8), 0);
-    // char **
-    PointerType* char_ptr_ptr = PointerType::get(char_ptr, 0);
-
     // main
-    std::vector<Type *> func_main_args;
-    func_main_args.push_back(IntegerType::get(mod->getContext(), 32));
-    func_main_args.push_back(char_ptr_ptr);
-    FunctionType* func_main_type = FunctionType::get(IntegerType::get(mod->getContext(), 32), func_main_args, false);
+    Type *func_main_args[] = { IntegerType::get(mod->getContext(), 32), PointerType::get(builder.getInt8PtrTy(), 0) };
+    FunctionType* func_main_type = FunctionType::get(builder.getInt32Ty(), func_main_args, false);
     Function *func_main = Function::Create(func_main_type, GlobalValue::ExternalLinkage, "main", mod);
 
     // printf
-    std::vector<Type *> func_printf_args;
-    func_printf_args.push_back(char_ptr);
-    FunctionType *func_printf_type = FunctionType::get(IntegerType::get(mod->getContext(), 32), func_printf_args, true);
+    FunctionType *func_printf_type = FunctionType::get(builder.getInt32Ty(), builder.getInt8PtrTy(), true);
     Function *func_printf = Function::Create(func_printf_type, GlobalValue::ExternalLinkage, "printf", mod);
 
     // main block
-    BasicBlock *bblock = BasicBlock::Create(mod->getContext(), "entry", func_main, 0);
+    BasicBlock *bblock = BasicBlock::Create(mod->getContext(), "", func_main, 0);
     builder.SetInsertPoint(bblock);
 
     // globals
+    named_values["__printf"] = func_printf;
     named_values["ι"] = generate_identity();
-    named_values["putchar"] = generate_putchar(func_printf);
+    named_values["putchar"] = generate_putchar();
 
-
-    Value *last = NULL;
     for (size_t i = 0; i < exprs->size(); ++i) {
-        last = (*exprs)[i]->codeGen();
-        if (!isa<NAssign>((*exprs)[i]) && last) {
-            print_value(func_printf, last);
+        Value *val = (*exprs)[i]->codeGen();
+        if (!isa<NAssign>((*exprs)[i]) && val) {
+            print_value(func_printf, val);
         }
     }
-    builder.CreateRet(ConstantInt::get(builder.getInt32Ty(), 0));
+    builder.CreateRet(builder.getInt32(0));
 
     std::cerr << "Code is generated." << std::endl;
     PassManager pm;

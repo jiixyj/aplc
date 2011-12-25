@@ -27,5 +27,4 @@ target_link_libraries(aplc
     LLVMTarget
     LLVMCore
     LLVMSupport
-    LLVMSystem
 )
