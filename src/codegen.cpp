@@ -172,7 +172,11 @@ static llvm::Function *replace_unresolved(llvm::Function *F, int index, Type *ty
 llvm::Value *NApply::codeGen() {
 
     llvm::Value *func = lhs.codeGen();
+    last_ident = "";
     llvm::Value *apply = rhs.codeGen();
+    if (!apply && last_ident != "") {
+        return ErrorV(("Unknown Identifier " + last_ident).c_str());
+    }
     if (!func) {
         return ErrorV("Error in NApply");
     }
@@ -214,6 +218,7 @@ llvm::Value *NApply::codeGen() {
             Value* nextindvar = builder.CreateBinOp(Instruction::Add, indvar, builder.getInt64(1));
             indvar->addIncoming(nextindvar, label_loop);
             builder.CreateCondBr(builder.CreateICmpEQ(nextindvar, array_size), label_loop_exit, label_loop);
+
             return NULL;
         }
     }
