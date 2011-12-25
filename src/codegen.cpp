@@ -269,6 +269,17 @@ llvm::Value *NBinaryOperator::codeGen() {
     return NULL;
 }
 
+static bool is_aplc_array(Value *val)
+{
+    PointerType *tmp1;
+    ArrayType *tmp;
+    return (tmp1 = dyn_cast<PointerType>(val->getType())) &&
+           tmp1->getElementType()->isStructTy() &&
+           tmp1->getElementType()->getNumContainedTypes() == 2 &&
+           (tmp = dyn_cast<ArrayType>(tmp1->getElementType()->getContainedType(1))) &&
+           tmp->getNumElements() == 0;
+}
+
 static void print_value(llvm::Function *printf, llvm::Value *val)
 {
     static Value *format_int = builder.CreateGlobalStringPtr("%d");
@@ -280,15 +291,10 @@ static void print_value(llvm::Function *printf, llvm::Value *val)
     static Value *array_beg = builder.CreateGlobalStringPtr("[");
     static Value *array_end = builder.CreateGlobalStringPtr("]");
 
-    PointerType *tmp1;
     if (val->getType()->isIntegerTy()) {
         builder.CreateCall2(printf, format_int, val);
-    } else if ((tmp1 = dyn_cast<PointerType>(val->getType()))) {
-        ArrayType *tmp2;
-        if (tmp1->getElementType()->isStructTy() &&
-                tmp1->getElementType()->getNumContainedTypes() == 2 &&
-                (tmp2 = dyn_cast<ArrayType>(tmp1->getElementType()->getContainedType(1))) &&
-                tmp2->getNumElements() == 0) {
+    } else if (val->getType()->isPointerTy()) {
+        if (is_aplc_array(val)) {
             Value *array_size = builder.CreateLoad(builder.CreateStructGEP(val, 0));
             Value *array_data = builder.CreateStructGEP(val, 1);
 
