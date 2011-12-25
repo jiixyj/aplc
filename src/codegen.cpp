@@ -160,7 +160,7 @@ llvm::Value *NApply::codeGen() {
 
     llvm::Value *func = lhs.codeGen();
     llvm::Value *apply = rhs.codeGen();
-    if (!func) {
+    if (!func || !apply) {
         return ErrorV("Error in NApply");
     }
     if (llvm::dyn_cast<llvm::Function>(apply)) {
