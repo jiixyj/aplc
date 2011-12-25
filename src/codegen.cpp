@@ -253,7 +253,7 @@ llvm::Value *NArray::codeGen() {
     types[1] = ArrayType::get(type, 0);
     Type *array_type = StructType::get(mod->getContext(), types, false);
 
-    Value *mem = builder.CreateAlloca(builder.getInt8Ty(), alloca_size);
+    Value *mem = builder.CreateAlloca(builder.getInt8Ty(), builder.CreateIntCast(alloca_size, builder.getInt32Ty(), false));
     Value *ret = builder.CreateBitCast(mem, PointerType::getUnqual(array_type));
 
     builder.CreateStore(ConstantInt::get(builder.getInt64Ty(), values.size()), builder.CreateStructGEP(ret, 0));
