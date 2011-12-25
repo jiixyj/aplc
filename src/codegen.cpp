@@ -86,6 +86,17 @@ llvm::Function *generate_putchar()
     return func;
 }
 
+static bool is_aplc_array(Value *val)
+{
+    PointerType *tmp1;
+    ArrayType *tmp;
+    return (tmp1 = dyn_cast<PointerType>(val->getType())) &&
+           tmp1->getElementType()->isStructTy() &&
+           tmp1->getElementType()->getNumContainedTypes() == 2 &&
+           (tmp = dyn_cast<ArrayType>(tmp1->getElementType()->getContainedType(1))) &&
+           tmp->getNumElements() == 0;
+}
+
 llvm::Value *NAssign::codeGen() {
     last_ident = "";
     l.codeGen();
@@ -96,7 +107,9 @@ llvm::Value *NAssign::codeGen() {
     llvm::Value *R = r.codeGen();
     if (!R) return NULL;
 
-    if (named_values[last_ident]->getType() != R->getType()) {
+    // TODO special case aplc array
+    if (named_values[last_ident]->getType()->isArrayTy() && is_aplc_array(R)) {
+    } else if (named_values[last_ident]->getType() != R->getType()) {
         return ErrorV("Types don't match in assignment");
     }
 
@@ -156,7 +169,6 @@ static llvm::Function *replace_unresolved(llvm::Function *F, int index, Type *ty
     return NewF;
 }
 
-
 llvm::Value *NApply::codeGen() {
 
     llvm::Value *func = lhs.codeGen();
@@ -172,6 +184,10 @@ llvm::Value *NApply::codeGen() {
             named_values[dyn_cast<NIdentifier>(&rhs)->name] = llvm::UndefValue::get(dyn_cast<UndefValue>(func)->getType());
         }
         return NULL;
+    } else if (is_aplc_array(func) && apply->getType()->isIntegerTy()) {
+        Value *array_data = builder.CreateStructGEP(func, 1);
+        Value *Idxs[] = { builder.getInt64(0), apply };
+        return builder.CreateLoad(builder.CreateGEP(array_data, ArrayRef<Value *>(Idxs)));
     } else {
         llvm::Function *func_func;
         if (!(func_func = llvm::dyn_cast<llvm::Function>(func))) {
@@ -181,8 +197,25 @@ llvm::Value *NApply::codeGen() {
         if (!is_resolved(func_func)) {
             func_func = replace_unresolved(func_func, 0, apply->getType(), true);
         }
-
-        return builder.CreateCall(func_func, apply);
+        if (apply->getType()->isIntegerTy()) {
+            return builder.CreateCall(func_func, apply);
+        } else if (is_aplc_array(apply)) {
+            Value *array_size = builder.CreateLoad(builder.CreateStructGEP(apply, 0));
+            Value *array_data = builder.CreateStructGEP(apply, 1);
+            BasicBlock* label_loop =        BasicBlock::Create(mod->getContext(), "", builder.GetInsertBlock()->getParent(), 0);
+            BasicBlock* label_loop_exit =   BasicBlock::Create(mod->getContext(), "", builder.GetInsertBlock()->getParent(), 0);
+            builder.CreateBr(label_loop);
+            BasicBlock* old = builder.GetInsertBlock();
+            builder.SetInsertPoint(label_loop);
+            PHINode* indvar = builder.CreatePHI(builder.getInt64Ty(), 2);
+            indvar->addIncoming(builder.getInt64(0), old);
+            Value *Idxs[] = { builder.getInt64(0), indvar };
+            Value *result = builder.CreateCall(func_func, builder.CreateLoad(builder.CreateGEP(array_data, ArrayRef<Value *>(Idxs))));
+            Value* nextindvar = builder.CreateBinOp(Instruction::Add, indvar, builder.getInt64(1));
+            indvar->addIncoming(nextindvar, label_loop);
+            builder.CreateCondBr(builder.CreateICmpEQ(nextindvar, array_size), label_loop_exit, label_loop);
+            return NULL;
+        }
     }
 }
 
@@ -230,6 +263,10 @@ llvm::Value *NArray::codeGen() {
         if (i == 0) type = val->getType();
         else if (val->getType() != type) return ErrorV("Types of array elements must be the same");
     }
+    if (values.size() && isa<UndefValue>(values[0])) {
+        return llvm::UndefValue::get(ArrayType::get(values[0]->getType(), 0));
+    }
+
     ArrayType *array = ArrayType::get(type, values.size());
     Type *types[] = { builder.getInt64Ty(), array };
     Type *array_real = StructType::get(mod->getContext(), types, false);
@@ -267,17 +304,6 @@ llvm::Value *NBinaryOperator::codeGen() {
     }
 
     return NULL;
-}
-
-static bool is_aplc_array(Value *val)
-{
-    PointerType *tmp1;
-    ArrayType *tmp;
-    return (tmp1 = dyn_cast<PointerType>(val->getType())) &&
-           tmp1->getElementType()->isStructTy() &&
-           tmp1->getElementType()->getNumContainedTypes() == 2 &&
-           (tmp = dyn_cast<ArrayType>(tmp1->getElementType()->getContainedType(1))) &&
-           tmp->getNumElements() == 0;
 }
 
 static void print_value(llvm::Function *printf, llvm::Value *val)
