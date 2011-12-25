@@ -56,15 +56,6 @@ public:
     }
 };
 
-class NString : public NExpression {
-public:
-    std::string name;
-    NString(const std::string& name) : name(name) {}
-    virtual llvm::Value* codeGen() {}
-    void print(std::stringstream &ss);
-    virtual NodeId getValueID() const { return NStringId; }
-};
-
 class NControl : public NExpression {
 public:
     NExpression& l;
@@ -173,8 +164,11 @@ public:
 
 class NArray : public NExpression {
 public:
+    bool isString;
+    std::string name;
     ExpressionList l;
-    NArray() {}
+    NArray(bool _isString = false, std::string str = std::string())
+        : isString(_isString), name(str) {}
     virtual llvm::Value* codeGen();
     void print(std::stringstream &ss);
     virtual NodeId getValueID() const { return NArrayId; }

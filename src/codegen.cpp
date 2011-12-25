@@ -27,7 +27,10 @@ llvm::Value *ErrorV(const char *str)
 
 static llvm::Module *mod;
 static llvm::IRBuilder<> builder(llvm::getGlobalContext());
-static std::map<std::string, llvm::Value *> named_values;
+
+typedef std::map<std::string, llvm::Value *> symbolTable;
+static symbolTable named_values;
+static std::string last_ident;
 
 namespace llvm { struct UnresolvedType; }
 static std::map<int, llvm::UnresolvedType *> unresolved_type_map;
@@ -56,42 +59,52 @@ struct UnresolvedType : public Type {
 
 llvm::Function *generate_identity()
 {
-    std::vector<Type *> func_ident_args;
-    func_ident_args.push_back(UnresolvedType::get(0));
-    FunctionType *func_ident_type = FunctionType::get(UnresolvedType::get(0), func_ident_args, false);
-    Function *func_ident = Function::Create(func_ident_type, GlobalValue::InternalLinkage, "ι");
+    std::vector<Type *> func_args;
+    func_args.push_back(UnresolvedType::get(0));
+    FunctionType *func_type = FunctionType::get(UnresolvedType::get(0), func_args, false);
+    Function *func = Function::Create(func_type, GlobalValue::InternalLinkage, "ι");
 
-    BasicBlock *block_ident = BasicBlock::Create(mod->getContext(), "entry", func_ident, 0);
-    llvm::IRBuilder<> builder_ident(llvm::getGlobalContext());
-    builder_ident.SetInsertPoint(block_ident);
-    builder_ident.CreateRet(func_ident->arg_begin());
+    BasicBlock *block = BasicBlock::Create(mod->getContext(), "entry", func, 0);
+    llvm::IRBuilder<> builder(llvm::getGlobalContext());
+    builder.SetInsertPoint(block);
+    builder.CreateRet(func->arg_begin());
 
-    return func_ident;
+    return func;
+}
+
+llvm::Function *generate_putchar(Function *printf)
+{
+    std::vector<Type *> func_args;
+    func_args.push_back(builder.getInt64Ty());
+    FunctionType *func_type = FunctionType::get(builder.getVoidTy(), func_args, false);
+    Function *func = Function::Create(func_type, GlobalValue::InternalLinkage, "putchar", mod);
+
+    BasicBlock *block = BasicBlock::Create(mod->getContext(), "entry", func, 0);
+    llvm::IRBuilder<> builder(llvm::getGlobalContext());
+    builder.SetInsertPoint(block);
+
+    static Value* const_ptr_12 = builder.CreateGlobalStringPtr("%c");
+    builder.CreateCall2(printf, const_ptr_12, func->arg_begin());
+    builder.CreateRetVoid();
+
+    return func;
 }
 
 llvm::Value *NAssign::codeGen() {
-    NApply *decl = llvm::dyn_cast<NApply>(&l);
-    if (!decl) {
-        return ErrorV("Expected NApply on the left");
-    }
-    NIdentifier *ident = llvm::dyn_cast<NIdentifier>(&decl->rhs);
-    if (!ident) {
+    last_ident = "";
+    Value *decl = l.codeGen();
+    if (last_ident == "") {
         return ErrorV("Identifier expected");
     }
-    llvm::Value *decl_type = decl->lhs.codeGen();
-    llvm::Value *ident_val = ident->codeGen();
-    if (!decl_type || ident_val ||
-        !llvm::isa<llvm::UndefValue>(decl_type)) {
-        return ErrorV("Invalid declaration");
-    }
+    std::string ident = last_ident;
     llvm::Value *R = r.codeGen();
-    if (R == 0) return NULL;
+    if (!R) return NULL;
 
-    if (decl_type->getType() != R->getType()) {
-        return ErrorV("Types don't match");
+    if (named_values[last_ident]->getType() != R->getType()) {
+        return ErrorV("Types don't match in assignment");
     }
 
-    named_values[ident->name] = R;
+    named_values[last_ident] = R;
     return R;
 }
 
@@ -160,22 +173,29 @@ llvm::Value *NApply::codeGen() {
 
     llvm::Value *func = lhs.codeGen();
     llvm::Value *apply = rhs.codeGen();
-    if (!func || !apply) {
+    if (!func) {
         return ErrorV("Error in NApply");
     }
-    if (llvm::dyn_cast<llvm::Function>(apply)) {
-        return ErrorV("Non-value arguments to NApply not supported yet");
-    }
-    llvm::Function *func_func;
-    if (!(func_func = llvm::dyn_cast<llvm::Function>(func))) {
-        return ErrorV("Non-function left arguments to NApply not supported yet");
-    }
+    if (isa<UndefValue>(func)) {
+        if (!apply) {
+            if (!isa<NIdentifier>(rhs)) {
+                return ErrorV("Expected identifier in declaration");
+            }
+            named_values[dyn_cast<NIdentifier>(&rhs)->name] = llvm::UndefValue::get(dyn_cast<UndefValue>(func)->getType());
+        }
+        return NULL;
+    } else {
+        llvm::Function *func_func;
+        if (!(func_func = llvm::dyn_cast<llvm::Function>(func))) {
+            return ErrorV("Non-function left arguments to NApply not supported yet");
+        }
 
-    if (!is_resolved(func_func)) {
-        func_func = replace_unresolved(func_func, 0, apply->getType(), true);
-    }
+        if (!is_resolved(func_func)) {
+            func_func = replace_unresolved(func_func, 0, apply->getType(), true);
+        }
 
-    return builder.CreateCall(func_func, apply);
+        return builder.CreateCall(func_func, apply);
+    }
 }
 
 llvm::Value *NInteger::codeGen() {
@@ -186,7 +206,12 @@ llvm::Value *NIdentifier::codeGen() {
     if (name == "int") {
         return llvm::UndefValue::get(builder.getInt64Ty());
     } else {
-        return named_values[name];
+        last_ident = name;
+        symbolTable::iterator it = named_values.find(name);
+        if (named_values.find(name) == named_values.end()) {
+            return NULL;
+        }
+        return it->second;
     }
 }
 
@@ -259,8 +284,8 @@ llvm::Value *NBinaryOperator::codeGen() {
     return NULL;
 }
 
-static void print_value(llvm::Function *printf, llvm::Value *val) {
-
+static void print_value(llvm::Function *printf, llvm::Value *val)
+{
     static Value *format_int = builder.CreateGlobalStringPtr("%d");
     static Value *format_str = builder.CreateGlobalStringPtr("%s");
     static Value *format_newline = builder.CreateGlobalStringPtr("\n");
@@ -302,9 +327,7 @@ static void print_value(llvm::Function *printf, llvm::Value *val) {
 
 void generate_code(ExpressionList *exprs)
 {
-
     mod = new Module("main", getGlobalContext());
-
 
     // char *
     PointerType* char_ptr = PointerType::get(IntegerType::get(mod->getContext(), 8), 0);
@@ -330,6 +353,7 @@ void generate_code(ExpressionList *exprs)
 
     // globals
     named_values["ι"] = generate_identity();
+    named_values["putchar"] = generate_putchar(func_printf);
 
 
     Value *last = NULL;

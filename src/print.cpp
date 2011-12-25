@@ -15,12 +15,6 @@ void NIdentifier::print(std::stringstream &ss) {
     indent -= indent_step;
 }
 
-void NString::print(std::stringstream &ss) {
-    indent += indent_step;
-    ss << std::string(indent, ' ') << "String " << name << std::endl;
-    indent -= indent_step;
-}
-
 void NControl::print(std::stringstream &ss) {
     indent += indent_step;
     ss << std::string(indent, ' ') << "Control" << std::endl;
@@ -98,9 +92,13 @@ void NTuple::print(std::stringstream &ss) {
 
 void NArray::print(std::stringstream &ss) {
     indent += indent_step;
-    ss << std::string(indent, ' ') << "Array; size: " << l.size() << std::endl;
-    for (size_t i = 0; i < l.size(); ++i) {
-        l[i]->print(ss);
+    if (isString) {
+        ss << std::string(indent, ' ') << "String " << name << std::endl;
+    } else {
+        ss << std::string(indent, ' ') << "Array; size: " << l.size() << std::endl;
+        for (size_t i = 0; i < l.size(); ++i) {
+            l[i]->print(ss);
+        }
     }
     indent -= indent_step;
 }
