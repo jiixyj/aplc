@@ -185,7 +185,7 @@ llvm::Value *NApply::codeGen() {
             if (!isa<NIdentifier>(rhs)) {
                 return ErrorV("Expected identifier in declaration");
             }
-            named_values[dyn_cast<NIdentifier>(&rhs)->name] = llvm::UndefValue::get(dyn_cast<UndefValue>(func)->getType());
+            named_values[dyn_cast<NIdentifier>(&rhs)->name] = llvm::UndefValue::get(func->getType());
         }
         return NULL;
     } else if (is_aplc_array(func) && apply->getType()->isIntegerTy()) {
@@ -206,6 +206,19 @@ llvm::Value *NApply::codeGen() {
         } else if (is_aplc_array(apply)) {
             Value *array_size = builder.CreateLoad(builder.CreateStructGEP(apply, 0));
             Value *array_data = builder.CreateStructGEP(apply, 1);
+            Type *element_type = cast<ArrayType>(cast<PointerType>(array_data->getType())
+                                                 ->getElementType())->getContainedType(0);
+            if (!is_resolved(func_func)) {
+                func_func = replace_unresolved(func_func, 0, element_type, true);
+            }
+            Type *types[] = { builder.getInt64Ty(), ArrayType::get(func_func->getReturnType(), 0)};
+            Type *array_real = StructType::get(mod->getContext(), types, false);
+            Value *alloca_size = ConstantExpr::getSizeOf(array_real);
+            alloca_size = builder.CreateAdd(alloca_size, builder.CreateMul(array_size, ConstantExpr::getSizeOf(element_type)));
+            Value *mem = builder.CreateAlloca(builder.getInt8Ty(), alloca_size);
+            Value *ret = builder.CreateBitCast(mem, PointerType::getUnqual(array_real));
+            builder.CreateStore(array_size, builder.CreateStructGEP(ret, 0));
+
             BasicBlock* label_loop = BasicBlock::Create(mod->getContext(), "", builder.GetInsertBlock()->getParent(), 0);
             BasicBlock* label_loop_exit = BasicBlock::Create(mod->getContext(), "", builder.GetInsertBlock()->getParent(), 0);
             builder.CreateBr(label_loop);
@@ -215,16 +228,14 @@ llvm::Value *NApply::codeGen() {
             indvar->addIncoming(builder.getInt64(0), old);
             Value *Idxs[] = { builder.getInt64(0), indvar };
             Value *arg = builder.CreateLoad(builder.CreateGEP(array_data, ArrayRef<Value *>(Idxs)));
-            if (!is_resolved(func_func)) {
-                func_func = replace_unresolved(func_func, 0, arg->getType(), true);
-            }
             Value *result = builder.CreateCall(func_func, arg);
+            builder.CreateStore(result, builder.CreateGEP(builder.CreateStructGEP(ret, 1), ArrayRef<Value *>(Idxs)));
             Value* nextindvar = builder.CreateBinOp(Instruction::Add, indvar, builder.getInt64(1));
             indvar->addIncoming(nextindvar, label_loop);
             builder.CreateCondBr(builder.CreateICmpEQ(nextindvar, array_size), label_loop_exit, label_loop);
+            builder.SetInsertPoint(label_loop_exit);
 
-            // FIXME return something right
-            return NULL;
+            return ret;
         }
     }
 }
@@ -285,7 +296,7 @@ llvm::Value *NArray::codeGen() {
     types[1] = ArrayType::get(type, 0);
     Type *array_type = StructType::get(mod->getContext(), types, false);
 
-    Value *mem = builder.CreateAlloca(builder.getInt8Ty(), builder.CreateIntCast(alloca_size, builder.getInt32Ty(), false));
+    Value *mem = builder.CreateAlloca(builder.getInt8Ty(), alloca_size);
     Value *ret = builder.CreateBitCast(mem, PointerType::getUnqual(array_type));
 
     builder.CreateStore(builder.getInt64(values.size()), builder.CreateStructGEP(ret, 0));
