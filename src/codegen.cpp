@@ -1,5 +1,6 @@
 #include "codegen.h"
 
+#include <cstdio>
 #include <map>
 
 #include <llvm/Constants.h>
@@ -64,6 +65,40 @@ llvm::Function *generate_identity()
     llvm::IRBuilder<> builder(llvm::getGlobalContext());
     builder.SetInsertPoint(block);
     builder.CreateRet(func->arg_begin());
+
+    return func;
+}
+
+llvm::Function *generate_alpha(Type *type_ptr)
+{
+    PointerType *type = cast<PointerType>(type_ptr);
+    std::vector<Type *> func_args;
+    func_args.push_back(type);
+    FunctionType *func_type = FunctionType::get(cast<StructType>(type->getElementType())->getContainedType(0), func_args, false);
+    Function *func = Function::Create(func_type, GlobalValue::InternalLinkage, "α", mod);
+
+    BasicBlock *block = BasicBlock::Create(mod->getContext(), "entry", func, 0);
+    llvm::IRBuilder<> builder(llvm::getGlobalContext());
+    builder.SetInsertPoint(block);
+    Value *el = builder.CreateStructGEP(func->arg_begin(), 0);
+    builder.CreateRet(builder.CreateLoad(el));
+
+    return func;
+}
+
+llvm::Function *generate_beta(Type *type_ptr)
+{
+    PointerType *type = cast<PointerType>(type_ptr);
+    std::vector<Type *> func_args;
+    func_args.push_back(type);
+    FunctionType *func_type = FunctionType::get(cast<StructType>(type->getElementType())->getContainedType(1), func_args, false);
+    Function *func = Function::Create(func_type, GlobalValue::InternalLinkage, "β", mod);
+
+    BasicBlock *block = BasicBlock::Create(mod->getContext(), "entry", func, 0);
+    llvm::IRBuilder<> builder(llvm::getGlobalContext());
+    builder.SetInsertPoint(block);
+    Value *el = builder.CreateStructGEP(func->arg_begin(), 1);
+    builder.CreateRet(builder.CreateLoad(el));
 
     return func;
 }
@@ -149,8 +184,11 @@ static llvm::Function *replace_unresolved(llvm::Function *F, int index, Type *ty
 
     // Create a new function type...
     Type *ret_type = F->getFunctionType()->getReturnType();
-    if (llvm::isa<UnresolvedType>(ret_type) && llvm::cast<UnresolvedType>(ret_type)->x == index) {
-        ret_type = type;
+    if (llvm::isa<UnresolvedType>(ret_type)) {
+        if (llvm::cast<UnresolvedType>(ret_type)->x == index) {
+            ret_type = type;
+        } else if (llvm::cast<UnresolvedType>(ret_type)->x >= 200) {
+        }
     }
     FunctionType *FTy = FunctionType::get(ret_type, ArgTypes, F->getFunctionType()->isVarArg());
 
@@ -171,14 +209,29 @@ static llvm::Function *replace_unresolved(llvm::Function *F, int index, Type *ty
 
 llvm::Value *NApply::codeGen() {
 
+    last_ident = "";
     llvm::Value *func = lhs.codeGen();
+    std::string func_name = last_ident;
     last_ident = "";
     llvm::Value *apply = rhs.codeGen();
-    if (!apply && last_ident != "") {
-        return ErrorV(("Unknown Identifier " + last_ident).c_str());
-    }
     if (!func) {
-        return ErrorV("Error in NApply");
+        if (is_aplc_array(apply)) {
+            if (func_name == "α") {
+                func = generate_alpha(cast<StructType>(cast<PointerType>(apply->getType())->getElementType())
+                                                    ->getContainedType(1)->getContainedType(0));
+            } else if (func_name == "β") {
+                func = generate_beta(cast<StructType>(cast<PointerType>(apply->getType())->getElementType())
+                                                    ->getContainedType(1)->getContainedType(0));
+            }
+        } else {
+            if (func_name == "α") {
+                func = generate_alpha(apply->getType());
+            } else if (func_name == "β") {
+                func = generate_beta(apply->getType());
+            }
+        }
+        std::cerr << "generate " + func_name << std::endl;
+        if (!func) return ErrorV("Unknown function in NApply");
     }
     if (isa<UndefValue>(func)) {
         if (!apply) {
@@ -211,13 +264,17 @@ llvm::Value *NApply::codeGen() {
             if (!is_resolved(func_func)) {
                 func_func = replace_unresolved(func_func, 0, element_type, true);
             }
-            Type *types[] = { builder.getInt64Ty(), ArrayType::get(func_func->getReturnType(), 0)};
-            Type *array_real = StructType::get(mod->getContext(), types, false);
-            Value *alloca_size = ConstantExpr::getSizeOf(array_real);
-            alloca_size = builder.CreateAdd(alloca_size, builder.CreateMul(array_size, ConstantExpr::getSizeOf(element_type)));
-            Value *mem = builder.CreateAlloca(builder.getInt8Ty(), alloca_size);
-            Value *ret = builder.CreateBitCast(mem, PointerType::getUnqual(array_real));
-            builder.CreateStore(array_size, builder.CreateStructGEP(ret, 0));
+
+            Value *ret = NULL;
+            if (!func_func->getReturnType()->isVoidTy()) {
+                Type *types[] = { builder.getInt64Ty(), ArrayType::get(func_func->getReturnType(), 0)};
+                Type *array_real = StructType::get(mod->getContext(), types, false);
+                Value *alloca_size = ConstantExpr::getSizeOf(array_real);
+                alloca_size = builder.CreateAdd(alloca_size, builder.CreateMul(array_size, ConstantExpr::getSizeOf(element_type)));
+                Value *mem = builder.CreateAlloca(builder.getInt8Ty(), alloca_size);
+                ret = builder.CreateBitCast(mem, PointerType::getUnqual(array_real));
+                builder.CreateStore(array_size, builder.CreateStructGEP(ret, 0));
+            }
 
             BasicBlock* label_loop = BasicBlock::Create(mod->getContext(), "", builder.GetInsertBlock()->getParent(), 0);
             BasicBlock* label_loop_exit = BasicBlock::Create(mod->getContext(), "", builder.GetInsertBlock()->getParent(), 0);
@@ -229,13 +286,15 @@ llvm::Value *NApply::codeGen() {
             Value *Idxs[] = { builder.getInt64(0), indvar };
             Value *arg = builder.CreateLoad(builder.CreateGEP(array_data, ArrayRef<Value *>(Idxs)));
             Value *result = builder.CreateCall(func_func, arg);
-            builder.CreateStore(result, builder.CreateGEP(builder.CreateStructGEP(ret, 1), ArrayRef<Value *>(Idxs)));
+            if (ret) builder.CreateStore(result, builder.CreateGEP(builder.CreateStructGEP(ret, 1), ArrayRef<Value *>(Idxs)));
             Value* nextindvar = builder.CreateBinOp(Instruction::Add, indvar, builder.getInt64(1));
             indvar->addIncoming(nextindvar, label_loop);
             builder.CreateCondBr(builder.CreateICmpEQ(nextindvar, array_size), label_loop_exit, label_loop);
             builder.SetInsertPoint(label_loop_exit);
 
             return ret;
+        } else {
+            return builder.CreateCall(func_func, apply);
         }
     }
 }
@@ -260,14 +319,28 @@ llvm::Value *NIdentifier::codeGen() {
 llvm::Value *NTuple::codeGen() {
     std::vector<Constant *> values;
     std::vector<Type *> types;
+    int isTypeExpr = 0;
     for (size_t i = 0; i < l.size(); ++i) {
         llvm::Value *val = l[i]->codeGen();
         if (!val) { return ErrorV("Bad Tuple"); }
         if (!llvm::isa<llvm::Constant>(val)) { return ErrorV("Tuple elements must be constants"); }
+        if (!isTypeExpr) {
+            if (isa<UndefValue>(val)) {
+                isTypeExpr = 1;
+            } else {
+                isTypeExpr = 2;
+            }
+        } else if ((isa<UndefValue>(val) && isTypeExpr != 1) ||
+                  (!isa<UndefValue>(val) && isTypeExpr != 2)) {
+            return ErrorV("mixed types and non-types in tuple");
+        }
         values.push_back(llvm::cast<llvm::Constant>(val));
         types.push_back(val->getType());
     }
-    Constant *tuple = llvm::ConstantStruct::get(llvm::StructType::get(mod->getContext(), types, false), values);
+    Constant *tuple = ConstantStruct::get(llvm::StructType::get(mod->getContext(), types, false), values);
+    if (isTypeExpr == 1) {
+        return UndefValue::get(tuple->getType());
+    }
     GlobalVariable* gvar = new GlobalVariable(*mod, tuple->getType(), true, GlobalValue::PrivateLinkage, 0, "struct");
     gvar->setInitializer(tuple);
     return gvar;
@@ -403,6 +476,8 @@ void generate_code(ExpressionList *exprs)
     // globals
     named_values["__printf"] = func_printf;
     named_values["ι"] = generate_identity();
+    // named_values["α"] = NULL;
+    // named_values["β"] = generate_beta();
     named_values["putchar"] = generate_putchar();
 
     for (size_t i = 0; i < exprs->size(); ++i) {
