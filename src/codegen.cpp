@@ -198,27 +198,32 @@ llvm::Value *NApply::codeGen() {
             return ErrorV("Non-function left arguments to NApply not supported yet");
         }
 
-        if (!is_resolved(func_func)) {
-            func_func = replace_unresolved(func_func, 0, apply->getType(), true);
-        }
         if (apply->getType()->isIntegerTy()) {
+            if (!is_resolved(func_func)) {
+                func_func = replace_unresolved(func_func, 0, apply->getType(), true);
+            }
             return builder.CreateCall(func_func, apply);
         } else if (is_aplc_array(apply)) {
             Value *array_size = builder.CreateLoad(builder.CreateStructGEP(apply, 0));
             Value *array_data = builder.CreateStructGEP(apply, 1);
-            BasicBlock* label_loop =        BasicBlock::Create(mod->getContext(), "", builder.GetInsertBlock()->getParent(), 0);
-            BasicBlock* label_loop_exit =   BasicBlock::Create(mod->getContext(), "", builder.GetInsertBlock()->getParent(), 0);
+            BasicBlock* label_loop = BasicBlock::Create(mod->getContext(), "", builder.GetInsertBlock()->getParent(), 0);
+            BasicBlock* label_loop_exit = BasicBlock::Create(mod->getContext(), "", builder.GetInsertBlock()->getParent(), 0);
             builder.CreateBr(label_loop);
             BasicBlock* old = builder.GetInsertBlock();
             builder.SetInsertPoint(label_loop);
             PHINode* indvar = builder.CreatePHI(builder.getInt64Ty(), 2);
             indvar->addIncoming(builder.getInt64(0), old);
             Value *Idxs[] = { builder.getInt64(0), indvar };
-            Value *result = builder.CreateCall(func_func, builder.CreateLoad(builder.CreateGEP(array_data, ArrayRef<Value *>(Idxs))));
+            Value *arg = builder.CreateLoad(builder.CreateGEP(array_data, ArrayRef<Value *>(Idxs)));
+            if (!is_resolved(func_func)) {
+                func_func = replace_unresolved(func_func, 0, arg->getType(), true);
+            }
+            Value *result = builder.CreateCall(func_func, arg);
             Value* nextindvar = builder.CreateBinOp(Instruction::Add, indvar, builder.getInt64(1));
             indvar->addIncoming(nextindvar, label_loop);
             builder.CreateCondBr(builder.CreateICmpEQ(nextindvar, array_size), label_loop_exit, label_loop);
 
+            // FIXME return something right
             return NULL;
         }
     }
