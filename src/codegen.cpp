@@ -114,8 +114,6 @@ llvm::Function *generate_putchar()
     llvm::IRBuilder<> builder(llvm::getGlobalContext());
     builder.SetInsertPoint(block);
 
-    static Value* zero_initializer = builder.CreateGlobalStringPtr("");
-    builder.CreateCall2(named_values["__setlocale"], builder.getInt32(6) /* LC_ALL */, zero_initializer);
     static Value* const_ptr_12 = builder.CreateGlobalStringPtr("%lc");
     builder.CreateCall2(named_values["__printf"], const_ptr_12, func->arg_begin());
     builder.CreateRetVoid();
@@ -146,6 +144,8 @@ llvm::Value *NAssign::codeGen() {
 
     // TODO special case aplc array
     if (named_values[last_ident]->getType()->isArrayTy() && is_aplc_array(R)) {
+    } else if (named_values[last_ident]->getType()->isArrayTy() && R->getType()->isArrayTy()) {
+      /* skip */
     } else if (named_values[last_ident]->getType() != R->getType()) {
         return ErrorV("Types don't match in assignment");
     }
@@ -209,7 +209,15 @@ static llvm::Function *replace_unresolved(llvm::Function *F, int index, Type *ty
     return NewF;
 }
 
+
 llvm::Value *NApply::codeGen() {
+    static std::map<std::string, int> projection_operators;
+    static bool projection_operators_generated;
+    if (!projection_operators_generated) {
+        projection_operators["α"] = 0;
+        projection_operators["β"] = 1;
+        projection_operators_generated = true;
+    }
 
     last_ident = "";
     llvm::Value *func = lhs.codeGen();
@@ -217,23 +225,15 @@ llvm::Value *NApply::codeGen() {
     last_ident = "";
     llvm::Value *apply = rhs.codeGen();
     if (!func) {
-        if (is_aplc_array(apply)) {
-            if (func_name == "α") {
-                func = generate_alpha(cast<StructType>(cast<PointerType>(apply->getType())->getElementType())
-                                                    ->getContainedType(1)->getContainedType(0));
-            } else if (func_name == "β") {
-                func = generate_beta(cast<StructType>(cast<PointerType>(apply->getType())->getElementType())
-                                                    ->getContainedType(1)->getContainedType(0));
+        if (apply->getType()->isStructTy()) {
+            return builder.CreateExtractValue(apply, projection_operators[func_name]);
+        } else if (apply->getType()->isArrayTy()) {
+            std::vector<Constant *> result;
+            for (size_t i = 0; i < cast<ArrayType>(apply->getType())->getNumElements(); ++i) {
+                result.push_back(cast<Constant>(builder.CreateExtractValue(builder.CreateExtractValue(apply, i), projection_operators[func_name])));
             }
-        } else {
-            if (func_name == "α") {
-                func = generate_alpha(apply->getType());
-            } else if (func_name == "β") {
-                func = generate_beta(apply->getType());
-            }
+            return ConstantArray::get(ArrayType::get(result[0]->getType(), result.size()), result);
         }
-        std::cerr << "generate " + func_name << std::endl;
-        if (!func) return ErrorV("Unknown function in NApply");
     }
     if (isa<UndefValue>(func)) {
         if (!apply) {
@@ -247,6 +247,13 @@ llvm::Value *NApply::codeGen() {
         Value *array_data = builder.CreateStructGEP(func, 1);
         Value *Idxs[] = { builder.getInt64(0), apply };
         return builder.CreateLoad(builder.CreateGEP(array_data, ArrayRef<Value *>(Idxs)));
+    } else if (func->getType()->isArrayTy() && isa<ConstantInt>(apply)) {
+        return builder.CreateExtractValue(func, cast<ConstantInt>(apply)->getZExtValue());
+    } else if (apply->getType()->isArrayTy()) {
+        for (size_t i = 0; i < cast<ArrayType>(apply->getType())->getNumElements(); ++i) {
+            builder.CreateCall(func, builder.CreateExtractValue(apply, i));
+        }
+        return NULL;
     } else {
         llvm::Function *func_func;
         if (!(func_func = llvm::dyn_cast<llvm::Function>(func))) {
@@ -343,9 +350,10 @@ llvm::Value *NTuple::codeGen() {
     if (isTypeExpr == 1) {
         return UndefValue::get(tuple->getType());
     }
-    GlobalVariable* gvar = new GlobalVariable(*mod, tuple->getType(), true, GlobalValue::PrivateLinkage, 0, "struct");
-    gvar->setInitializer(tuple);
-    return gvar;
+    // GlobalVariable* gvar = new GlobalVariable(*mod, tuple->getType(), true, GlobalValue::PrivateLinkage, 0, "struct");
+    // gvar->setInitializer(tuple);
+    // return gvar;
+    return tuple;
 }
 
 llvm::Value *NArray::codeGen() {
@@ -364,6 +372,7 @@ llvm::Value *NArray::codeGen() {
     }
 
     ArrayType *array = ArrayType::get(type, values.size());
+    return ConstantArray::get(array, values);
     Type *types[] = { builder.getInt64Ty(), array };
     Type *array_real = StructType::get(mod->getContext(), types, false);
     Constant *alloca_size = ConstantExpr::getSizeOf(array_real);
@@ -402,16 +411,22 @@ llvm::Value *NBinaryOperator::codeGen() {
     return NULL;
 }
 
+
 static void print_value(llvm::Function *printf, llvm::Value *val)
 {
-    static Value *format_int = builder.CreateGlobalStringPtr("%d");
-    static Value *format_str = builder.CreateGlobalStringPtr("%s");
-    static Value *format_newline = builder.CreateGlobalStringPtr("\n");
-    static Value *struct_beg = builder.CreateGlobalStringPtr("(");
-    static Value *struct_del = builder.CreateGlobalStringPtr(", ");
-    static Value *struct_end = builder.CreateGlobalStringPtr(")");
-    static Value *array_beg = builder.CreateGlobalStringPtr("[");
-    static Value *array_end = builder.CreateGlobalStringPtr("]");
+    static bool strings_generated = false;
+    Value *format_int, *format_str, *format_newline, *struct_beg, *struct_del, *struct_end, *array_beg, *array_end;
+    if (!strings_generated) {
+        format_int = builder.CreateGlobalStringPtr("%d");
+        format_str = builder.CreateGlobalStringPtr("%s");
+        format_newline = builder.CreateGlobalStringPtr("\n");
+        struct_beg = builder.CreateGlobalStringPtr("(");
+        struct_del = builder.CreateGlobalStringPtr(", ");
+        struct_end = builder.CreateGlobalStringPtr(")");
+        array_beg = builder.CreateGlobalStringPtr("[");
+        array_end = builder.CreateGlobalStringPtr("]");
+        strings_generated = true;
+    }
 
     if (val->getType()->isIntegerTy()) {
         builder.CreateCall2(printf, format_int, val);
@@ -480,13 +495,16 @@ void generate_code(ExpressionList *exprs)
     BasicBlock *bblock = BasicBlock::Create(mod->getContext(), "", func_main, 0);
     builder.SetInsertPoint(bblock);
 
+    static Value* zero_initializer = builder.CreateGlobalStringPtr("");
+    builder.CreateCall2(named_values["__setlocale"], builder.getInt32(6) /* LC_ALL */, zero_initializer);
+
     // globals
     named_values["ι"] = generate_identity();
     named_values["putchar"] = generate_putchar();
 
     for (size_t i = 0; i < exprs->size(); ++i) {
         Value *val = (*exprs)[i]->codeGen();
-        if (!isa<NAssign>((*exprs)[i]) && val) {
+        if (!isa<NAssign>((*exprs)[i]) && val && !val->getType()->isVoidTy()) {
             print_value(cast<Function>(named_values["__printf"]), val);
         }
     }
