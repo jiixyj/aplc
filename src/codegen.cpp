@@ -504,7 +504,8 @@ void generate_code(ExpressionList *exprs)
 
     for (size_t i = 0; i < exprs->size(); ++i) {
         Value *val = (*exprs)[i]->codeGen();
-        if (!isa<NAssign>((*exprs)[i]) && val && !val->getType()->isVoidTy()) {
+        if (!isa<NAssign>((*exprs)[i]) && val && !val->getType()->isVoidTy() &&
+                !(val->getType()->isArrayTy() && cast<ArrayType>(val->getType())->getContainedType(0)->isVoidTy())) {
             print_value(cast<Function>(named_values["__printf"]), val);
         }
     }
