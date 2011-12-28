@@ -31,7 +31,6 @@ static llvm::IRBuilder<> builder(llvm::getGlobalContext());
 
 typedef std::map<std::string, llvm::Value *> symbolTable;
 static symbolTable named_values;
-static std::string last_ident;
 
 namespace llvm { struct UnresolvedType; }
 static std::map<int, llvm::UnresolvedType *> unresolved_type_map;
@@ -133,25 +132,58 @@ static bool is_aplc_array(Value *val)
 }
 
 llvm::Value *NAssign::codeGen() {
-    last_ident = "";
-    l.codeGen();
-    if (last_ident == "") {
-        return ErrorV("Identifier expected");
+    Value *id = l.codeGen();
+    if (isa<Argument>(id)) {
+        named_values[id->getName()] = id;
     }
-    std::string ident = last_ident;
+    std::string ident = id->getName();
+    std::cerr << ident << std::endl;
     llvm::Value *R = r.codeGen();
     if (!R) return NULL;
 
     // TODO special case aplc array
-    if (named_values[last_ident]->getType()->isArrayTy() && is_aplc_array(R)) {
-    } else if (named_values[last_ident]->getType()->isArrayTy() && R->getType()->isArrayTy()) {
+    std::cerr << "NAssign" << ident << std::endl;
+    if (named_values[ident]->getType()->isArrayTy() && is_aplc_array(R)) {
+    } else if (named_values[ident]->getType()->isArrayTy() && R->getType()->isArrayTy()) {
       /* skip */
-    } else if (named_values[last_ident]->getType() != R->getType()) {
+    } else if (named_values[ident]->getType() != R->getType()) {
+        raw_fd_ostream o(fileno(stderr), false);
+        named_values[ident]->getType()->print(o);
+        std::cerr << std::endl;
+        R->getType()->print(o);
+        std::cerr << std::endl;
         return ErrorV("Types don't match in assignment");
     }
 
-    named_values[last_ident] = R;
+    named_values[ident] = R;
     return R;
+}
+
+llvm::Value *NLambda::codeGen() {
+    Value* lhs = l.codeGen();
+    Value* mhs = m.codeGen();
+
+    Function *F = dyn_cast<Function>(lhs);
+    std::vector<Type*> ArgTypes;
+    std::map<std::string, Argument *> func_args;
+    for (Function::arg_iterator I = F->arg_begin(), E = F->arg_end(); I != E; ++I) {
+        func_args[I->getName()] = I;
+        ArgTypes.push_back(I->getType());
+    }
+
+    FunctionType *FTy = FunctionType::get(mhs->getType(), ArgTypes, F->getFunctionType()->isVarArg());
+    Function *NewF = Function::Create(FTy, F->getLinkage(), F->getName(), mod);
+    for (Function::arg_iterator I = F->arg_begin(), I2 = NewF->arg_begin(), E = F->arg_end(); I != E; ++I, ++I2) {
+        I2->setName(I->getName());
+    }
+
+    BasicBlock *block = BasicBlock::Create(mod->getContext(), "entry", NewF, 0);
+    BasicBlock* old = builder.GetInsertBlock();
+    builder.SetInsertPoint(block);
+    Value* rhs = r.codeGen();
+    builder.CreateRet(rhs);
+    builder.SetInsertPoint(old);
+    return NewF;
 }
 
 static bool is_resolved(llvm::Function *F)
@@ -219,30 +251,27 @@ llvm::Value *NApply::codeGen() {
         projection_operators_generated = true;
     }
 
-    last_ident = "";
     llvm::Value *func = lhs.codeGen();
-    std::string func_name = last_ident;
-    last_ident = "";
     llvm::Value *apply = rhs.codeGen();
-    if (!func) {
+    if (isa<Argument>(func) && projection_operators.find(func->getName()) != projection_operators.end()) {
         if (apply->getType()->isStructTy()) {
-            return builder.CreateExtractValue(apply, projection_operators[func_name]);
+            return builder.CreateExtractValue(apply, projection_operators[func->getName()]);
         } else if (apply->getType()->isArrayTy()) {
             std::vector<Constant *> result;
             for (size_t i = 0; i < cast<ArrayType>(apply->getType())->getNumElements(); ++i) {
-                result.push_back(cast<Constant>(builder.CreateExtractValue(builder.CreateExtractValue(apply, i), projection_operators[func_name])));
+                result.push_back(cast<Constant>(builder.CreateExtractValue(builder.CreateExtractValue(apply, i), projection_operators[func->getName()])));
             }
             return ConstantArray::get(ArrayType::get(result[0]->getType(), result.size()), result);
         }
     }
-    if (isa<UndefValue>(func)) {
-        if (!apply) {
+    if (isa<Argument>(func) || (isa<ConstantStruct>(func) && isa<Argument>(builder.CreateExtractValue(func, 0)))) {
+        if (isa<Argument>(apply)) {
             if (!isa<NIdentifier>(rhs)) {
                 return ErrorV("Expected identifier in declaration");
             }
-            named_values[dyn_cast<NIdentifier>(&rhs)->name] = llvm::UndefValue::get(func->getType());
+            std::cerr << "apply getname: " << apply->getName().str() << std::endl;
+            return new Argument(func->getType(), apply->getName());
         }
-        return NULL;
     } else if (is_aplc_array(func) && apply->getType()->isIntegerTy()) {
         Value *array_data = builder.CreateStructGEP(func, 1);
         Value *Idxs[] = { builder.getInt64(0), apply };
@@ -250,22 +279,39 @@ llvm::Value *NApply::codeGen() {
     } else if (func->getType()->isArrayTy() && isa<ConstantInt>(apply)) {
         return builder.CreateExtractValue(func, cast<ConstantInt>(apply)->getZExtValue());
     } else if (apply->getType()->isArrayTy()) {
+        std::vector<Value *> results;
         for (size_t i = 0; i < cast<ArrayType>(apply->getType())->getNumElements(); ++i) {
-            builder.CreateCall(func, builder.CreateExtractValue(apply, i));
+            Value *arg = builder.CreateExtractValue(apply, i);
+            if (arg->getType()->isStructTy()) {
+                std::vector<Value *> args;
+                for (size_t i = 0; i < cast<StructType>(arg->getType())->getNumElements(); ++i) {
+                    args.push_back(builder.CreateExtractValue(arg, i));
+                }
+                results.push_back(builder.CreateCall(func, args));
+            } else {
+                results.push_back(builder.CreateCall(func, builder.CreateExtractValue(apply, i)));
+            }
         }
-        return NULL;
+        if (!cast<Function>(func)->getReturnType()->isVoidTy()) {
+            Value *array_alloc = builder.CreateAlloca(cast<Function>(func)->getReturnType(), builder.getInt64(results.size()));
+            for (size_t i = 0; i < results.size(); ++i) {
+                Value *Idxs[] = { builder.getInt64(i) };
+                builder.CreateStore(results[i], builder.CreateGEP(array_alloc, ArrayRef<Value *>(Idxs)));
+            }
+            return builder.CreateLoad(
+                    builder.CreateBitCast(array_alloc,
+                        PointerType::getUnqual(ArrayType::get(cast<Function>(func)->getReturnType(), results.size()))));
+        } else {
+            return NULL;
+        }
     } else {
         llvm::Function *func_func;
+        std::cerr << "I was here func func" << std::endl;
         if (!(func_func = llvm::dyn_cast<llvm::Function>(func))) {
             return ErrorV("Non-function left arguments to NApply not supported yet");
         }
 
-        if (apply->getType()->isIntegerTy()) {
-            if (!is_resolved(func_func)) {
-                func_func = replace_unresolved(func_func, 0, apply->getType(), true);
-            }
-            return builder.CreateCall(func_func, apply);
-        } else if (is_aplc_array(apply)) {
+        if (is_aplc_array(apply)) {
             Value *array_size = builder.CreateLoad(builder.CreateStructGEP(apply, 0));
             Value *array_data = builder.CreateStructGEP(apply, 1);
             Type *element_type = cast<ArrayType>(cast<PointerType>(array_data->getType())
@@ -302,10 +348,32 @@ llvm::Value *NApply::codeGen() {
             builder.SetInsertPoint(label_loop_exit);
 
             return ret;
+        } else if (apply->getType()->isStructTy()) {
+            std::vector<Value *> args;
+            for (size_t i = 0; i < cast<StructType>(apply->getType())->getNumElements(); ++i) {
+                args.push_back(builder.CreateExtractValue(apply, i));
+            }
+            return builder.CreateCall(func_func, args);
         } else {
             return builder.CreateCall(func_func, apply);
         }
     }
+}
+
+llvm::Value *NFuncType::codeGen() {
+    Value *l = lhs.codeGen();
+    Value *r = rhs.codeGen();
+
+    std::vector<Type *> arg_types;
+    if (l->getType()->isStructTy()) {
+        for (size_t i = 0; i < cast<StructType>(l->getType())->getNumElements(); ++i) {
+            arg_types.push_back(cast<StructType>(l->getType())->getContainedType(i));
+        }
+    } else {
+        arg_types.push_back(l->getType());
+    }
+    Function *dummy = Function::Create(FunctionType::get(r->getType(), arg_types, false), GlobalValue::InternalLinkage);
+    return new Argument(dummy->getType());
 }
 
 llvm::Value *NInteger::codeGen() {
@@ -314,42 +382,56 @@ llvm::Value *NInteger::codeGen() {
 
 llvm::Value *NIdentifier::codeGen() {
     if (name == "int") {
-        return llvm::UndefValue::get(builder.getInt64Ty());
+        return new Argument(builder.getInt64Ty());
     } else {
-        last_ident = name;
         symbolTable::iterator it = named_values.find(name);
         if (named_values.find(name) == named_values.end()) {
-            return NULL;
+            return new Argument(builder.getInt64Ty(), name);
         }
         return it->second;
     }
 }
 
 llvm::Value *NTuple::codeGen() {
-    std::vector<Constant *> values;
+    std::vector<Value *> values;
+    std::vector<Constant *> constants;
     std::vector<Type *> types;
     int isTypeExpr = 0;
+
     for (size_t i = 0; i < l.size(); ++i) {
         llvm::Value *val = l[i]->codeGen();
         if (!val) { return ErrorV("Bad Tuple"); }
-        if (!llvm::isa<llvm::Constant>(val)) { return ErrorV("Tuple elements must be constants"); }
+        if (!isa<Constant>(val) && !isa<Argument>(val)) { return ErrorV("Tuple elements must be constants or arguments"); }
         if (!isTypeExpr) {
-            if (isa<UndefValue>(val)) {
+            if (isa<Argument>(val)) {
                 isTypeExpr = 1;
             } else {
                 isTypeExpr = 2;
             }
-        } else if ((isa<UndefValue>(val) && isTypeExpr != 1) ||
-                  (!isa<UndefValue>(val) && isTypeExpr != 2)) {
+        } else if ((isa<Argument>(val) && isTypeExpr != 1) ||
+                  (!isa<Argument>(val) && isTypeExpr != 2)) {
             return ErrorV("mixed types and non-types in tuple");
         }
-        values.push_back(llvm::cast<llvm::Constant>(val));
+        values.push_back(val);
+        constants.push_back(dyn_cast<Constant>(val));
         types.push_back(val->getType());
     }
-    Constant *tuple = ConstantStruct::get(llvm::StructType::get(mod->getContext(), types, false), values);
-    if (isTypeExpr == 1) {
-        return UndefValue::get(tuple->getType());
+
+    if (isTypeExpr == 1 && cast<Argument>(values[0])->hasName()) {  /* Function arguments */
+        FunctionType *ft = FunctionType::get(builder.getVoidTy(), types, false);
+        Function *f = Function::Create(ft, GlobalValue::InternalLinkage);
+        Function::arg_iterator args = f->arg_begin();
+
+        for (size_t i = 0; i < l.size(); ++i) {
+            args++->setName(cast<Argument>(values[i])->getName());
+        }
+        return f;
+    } else if (isTypeExpr == 1) {
+        return new Argument(StructType::get(mod->getContext(), types, false));
     }
+
+    Constant *tuple = ConstantStruct::get(llvm::StructType::get(mod->getContext(), types, false), constants);
+
     // GlobalVariable* gvar = new GlobalVariable(*mod, tuple->getType(), true, GlobalValue::PrivateLinkage, 0, "struct");
     // gvar->setInitializer(tuple);
     // return gvar;
@@ -362,13 +444,13 @@ llvm::Value *NArray::codeGen() {
     for (size_t i = 0; i < l.size(); ++i) {
         Value *val = l[i]->codeGen();
         if (!val) { return ErrorV("Bad Tuple"); }
-        if (!isa<Constant>(val)) return ErrorV("Tuple elements must be constants");
+        if (!isa<Constant>(val) && !isa<Argument>(val)) return ErrorV("Tuple elements must be constants or arguments");
         values.push_back(cast<Constant>(val));
         if (i == 0) type = val->getType();
         else if (val->getType() != type) return ErrorV("Types of array elements must be the same");
     }
-    if (values.size() && isa<UndefValue>(values[0])) {
-        return llvm::UndefValue::get(ArrayType::get(values[0]->getType(), 0));
+    if (values.size() && isa<Argument>(values[0])) {
+        return new Argument(ArrayType::get(values[0]->getType(), 0));
     }
 
     ArrayType *array = ArrayType::get(type, values.size());
@@ -397,13 +479,13 @@ llvm::Value *NBinaryOperator::codeGen() {
     switch (op) {
     case TPLUS:
         std::cerr << "TPLUS" << std::endl;
-        return builder.CreateAdd(L, R, "addtmp");
+        return builder.CreateAdd(L, R);
     case TMINUS:
         std::cerr << "TMINUS" << std::endl;
-        return builder.CreateSub(L, R, "subtmp");
+        return builder.CreateSub(L, R);
     case TMUL:
         std::cerr << "TMUL" << std::endl;
-        return builder.CreateMul(L, R, "multmp");
+        return builder.CreateMul(L, R);
     default:
         return ErrorV("invalid binary operator");
     }
@@ -415,7 +497,7 @@ llvm::Value *NBinaryOperator::codeGen() {
 static void print_value(llvm::Function *printf, llvm::Value *val)
 {
     static bool strings_generated = false;
-    Value *format_int, *format_str, *format_newline, *struct_beg, *struct_del, *struct_end, *array_beg, *array_end;
+    static Value *format_int, *format_str, *format_newline, *struct_beg, *struct_del, *struct_end, *array_beg, *array_end;
     if (!strings_generated) {
         format_int = builder.CreateGlobalStringPtr("%d");
         format_str = builder.CreateGlobalStringPtr("%s");
@@ -467,7 +549,14 @@ static void print_value(llvm::Function *printf, llvm::Value *val)
             }
             builder.CreateCall(printf, struct_end);
         }
-    } else {
+    } else if (val->getType()->isArrayTy()) {
+        builder.CreateCall(printf, array_beg);
+        size_t size = cast<ArrayType>(val->getType())->getNumElements();
+        for (size_t i = 0; i < size; ++i) {
+            builder.CreateCall2(printf, format_int, builder.CreateExtractValue(val, i));
+            if (i != size - 1) builder.CreateCall(printf, struct_del);
+        }
+        builder.CreateCall(printf, array_end);
         return;
     }
     builder.CreateCall(printf, format_newline);

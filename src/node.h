@@ -86,7 +86,7 @@ public:
     NExpression& m;
     NExpression& r;
     NLambda(NExpression& l, NExpression& m, NExpression& r) : l(l), m(m), r(r) {}
-    virtual llvm::Value* codeGen() {}
+    virtual llvm::Value* codeGen();
     void print(std::stringstream &ss);
     virtual NodeId getValueID() const { return NLambdaId; }
 };
@@ -145,7 +145,7 @@ public:
     NExpression& rhs;
     NFuncType(NExpression& lhs, NExpression& rhs) :
         lhs(lhs), rhs(rhs) {}
-    virtual llvm::Value* codeGen() {}
+    virtual llvm::Value* codeGen();
     void print(std::stringstream &ss);
     virtual NodeId getValueID() const { return NFuncTypeId; }
 };
