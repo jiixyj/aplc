@@ -114,7 +114,9 @@ llvm::Function *generate_putchar()
     llvm::IRBuilder<> builder(llvm::getGlobalContext());
     builder.SetInsertPoint(block);
 
-    static Value* const_ptr_12 = builder.CreateGlobalStringPtr("%c");
+    static Value* zero_initializer = builder.CreateGlobalStringPtr("");
+    builder.CreateCall2(named_values["__setlocale"], builder.getInt32(6) /* LC_ALL */, zero_initializer);
+    static Value* const_ptr_12 = builder.CreateGlobalStringPtr("%lc");
     builder.CreateCall2(named_values["__printf"], const_ptr_12, func->arg_begin());
     builder.CreateRetVoid();
 
@@ -467,23 +469,25 @@ void generate_code(ExpressionList *exprs)
 
     // printf
     FunctionType *func_printf_type = FunctionType::get(builder.getInt32Ty(), builder.getInt8PtrTy(), true);
-    Function *func_printf = Function::Create(func_printf_type, GlobalValue::ExternalLinkage, "printf", mod);
+    named_values["__printf"] = Function::Create(func_printf_type, GlobalValue::ExternalLinkage, "printf", mod);
+
+    // setlocale
+    Type *func_setlocale_args[] = { builder.getInt32Ty(), builder.getInt8PtrTy() };
+    FunctionType *func_setlocale_type = FunctionType::get(builder.getInt8PtrTy(), func_setlocale_args, false);
+    named_values["__setlocale"] = Function::Create(func_setlocale_type, GlobalValue::ExternalLinkage, "setlocale", mod);
 
     // main block
     BasicBlock *bblock = BasicBlock::Create(mod->getContext(), "", func_main, 0);
     builder.SetInsertPoint(bblock);
 
     // globals
-    named_values["__printf"] = func_printf;
     named_values["ι"] = generate_identity();
-    // named_values["α"] = NULL;
-    // named_values["β"] = generate_beta();
     named_values["putchar"] = generate_putchar();
 
     for (size_t i = 0; i < exprs->size(); ++i) {
         Value *val = (*exprs)[i]->codeGen();
         if (!isa<NAssign>((*exprs)[i]) && val) {
-            print_value(func_printf, val);
+            print_value(cast<Function>(named_values["__printf"]), val);
         }
     }
     builder.CreateRet(builder.getInt32(0));

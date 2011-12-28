@@ -1,5 +1,6 @@
 %{
     #include <cstdio>
+    #include <iconv.h>
     #include <llvm/Support/Casting.h>
     #include "node.h"
     ExpressionList *file; /* the top level root node of our final AST */
@@ -153,7 +154,24 @@ expr_atom : ident
 ident : TIDENTIFIER { $$ = new NIdentifier(*$1); delete $1; }
       ;
 
-string : TSTRING { $$ = new NArray(true, *$1); for (size_t i = 1; i < (*$1).size() - 1; ++i) { llvm::cast<NArray>($$)->l.push_back(new NInteger((*$1).at(i))); } delete $1; }
+string : TSTRING { $$ = new NArray(true, *$1);
+                   std::string& s = (*$1);
+                   s[s.size() - 1] = '\0';
+                   char *s_c = const_cast<char *>(s.c_str()) + 1;
+                   size_t s_c_size = s.size() - 2;
+                   std::vector<int> utf32(s.size());
+                   char *utf32_first = reinterpret_cast<char *>(&utf32[0]);
+                   size_t utf32_size = utf32.size() * sizeof(int);
+                   iconv_t utf8_to_utf32 = iconv_open("UTF32LE", "UTF8");
+                   if (iconv(utf8_to_utf32, &s_c, &s_c_size,
+                                            &utf32_first, &utf32_size) == (size_t) -1) {
+                       perror("iconv");
+                   }
+                   for (size_t i = 0; i < utf32.size() - utf32_size / sizeof(int); ++i) {
+                       std::cerr << utf32[i] << std::endl;
+                       llvm::cast<NArray>($$)->l.push_back(new NInteger(utf32[i]));
+                   }
+                   delete $1; }
        ;
 
 integer : TINTEGER { $$ = new NInteger(atol($1->c_str())); delete $1; }
