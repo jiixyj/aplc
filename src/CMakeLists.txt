@@ -1,3 +1,14 @@
+if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+    file(READ "${CMAKE_ROOT}/Modules/FindBISON.cmake" FIND_BISON_FILE)
+    string(REPLACE "bison" "yacc" FIND_BISON_FILE "${FIND_BISON_FILE}")
+    string(REGEX REPLACE "EXECUTE_PROCESS\\(.*\\-\\-version[^\\)]*\\)" ""
+                         FIND_BISON_FILE "${FIND_BISON_FILE}")
+    string(REPLACE "INCLUDE(\${CMAKE_CURRENT_LIST_DIR}/FindPackageHandleStandardArgs.cmake)"
+                   "INCLUDE(FindPackageHandleStandardArgs)"
+                   FIND_BISON_FILE "${FIND_BISON_FILE}")
+    file(WRITE "${CMAKE_BINARY_DIR}/FindBISON.cmake" "${FIND_BISON_FILE}")
+endif()
+
 find_package(LLVM REQUIRED)
 find_package(BISON REQUIRED)
 find_package(FLEX REQUIRED)
