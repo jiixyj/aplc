@@ -157,12 +157,16 @@ ident : TIDENTIFIER { $$ = new NIdentifier(*$1); delete $1; }
 string : TSTRING { $$ = new NArray(true, *$1);
                    std::string& s = (*$1);
                    s[s.size() - 1] = '\0';
+#ifdef __FreeBSD__
+                   const char *s_c = s.c_str() + 1;
+#else
                    char *s_c = const_cast<char *>(s.c_str()) + 1;
+#endif
                    size_t s_c_size = s.size() - 2;
                    std::vector<int> utf32(s.size());
                    char *utf32_first = reinterpret_cast<char *>(&utf32[0]);
                    size_t utf32_size = utf32.size() * sizeof(int);
-                   iconv_t utf8_to_utf32 = iconv_open("UTF32LE", "UTF8");
+                   iconv_t utf8_to_utf32 = iconv_open("UTF-32LE", "UTF-8");
                    if (iconv(utf8_to_utf32, &s_c, &s_c_size,
                                             &utf32_first, &utf32_size) == (size_t) -1) {
                        perror("iconv");

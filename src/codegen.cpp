@@ -585,7 +585,7 @@ void generate_code(ExpressionList *exprs)
     builder.SetInsertPoint(bblock);
 
     static Value* zero_initializer = builder.CreateGlobalStringPtr("");
-    builder.CreateCall2(named_values["__setlocale"], builder.getInt32(6) /* LC_ALL */, zero_initializer);
+    builder.CreateCall2(named_values["__setlocale"], builder.getInt32(LC_ALL), zero_initializer);
 
     // globals
     named_values["ι"] = generate_identity();
