@@ -10,7 +10,12 @@ BISON_TARGET(MyParser parser.ypp ${CMAKE_CURRENT_BINARY_DIR}/parser.cpp
              COMPILE_FLAGS "-v")
 FLEX_TARGET(MyScanner lexer.lpp  ${CMAKE_CURRENT_BINARY_DIR}/lexer.cpp)
 ADD_FLEX_BISON_DEPENDENCY(MyScanner MyParser)
-execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_BINARY_DIR}/parser.hpp ${CMAKE_CURRENT_BINARY_DIR}/parser.h)
+if("${BISON_EXECUTABLE}" MATCHES ".*yacc")
+    execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_BINARY_DIR}/parser.cpp.h ${CMAKE_CURRENT_BINARY_DIR}/parser.hpp)
+    execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_BINARY_DIR}/parser.cpp.h ${CMAKE_CURRENT_BINARY_DIR}/parser.h)
+else()
+    execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_BINARY_DIR}/parser.hpp ${CMAKE_CURRENT_BINARY_DIR}/parser.h)
+endif()
 
 add_executable(aplc main print codegen ${BISON_MyParser_OUTPUTS} ${FLEX_MyScanner_OUTPUTS})
 set_target_properties(aplc PROPERTIES
@@ -27,4 +32,5 @@ target_link_libraries(aplc
     LLVMTarget
     LLVMCore
     LLVMSupport
+    iconv
 )
