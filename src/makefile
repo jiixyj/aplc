@@ -8,7 +8,7 @@ BINDIR        ?= /bin
 DESTDIR       ?= /usr/local
 
 # setup llvm
-LLVM_CXXFLAGS != llvm-config --cxxflags
+LLVM_CXXFLAGS != llvm-config --cxxflags | sed "s/-I/-isystem/g"
 LLVM_LDFLAGS  != llvm-config --ldflags
 LLVM_LDADD    != llvm-config --libs
 CXXFLAGS      += ${LLVM_CXXFLAGS}
@@ -33,4 +33,3 @@ lexer.l: lexer.lpp
 	ln -s ${.IMPSRC} ${.TARGET}
 
 .include <bsd.prog.mk>
-
