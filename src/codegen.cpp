@@ -120,6 +120,10 @@ llvm::Function *generate_putchar()
     return func;
 }
 
+llvm::Value *NControl::codeGen() {
+    return ErrorV("NControl codegen not implemented yet");
+}
+
 static bool is_aplc_array(Value *val)
 {
     PointerType *tmp1;
@@ -186,6 +190,10 @@ llvm::Value *NLambda::codeGen() {
     return NewF;
 }
 
+llvm::Value *NComparisonOperator::codeGen() {
+    return ErrorV("NComparisonOperator codegen not implemented yet");
+}
+
 static bool is_resolved(llvm::Function *F)
 {
     std::vector<Type *> ArgTypes;
@@ -241,6 +249,9 @@ static llvm::Function *replace_unresolved(llvm::Function *F, int index, Type *ty
     return NewF;
 }
 
+llvm::Value *NUnaryOperator::codeGen() {
+    return ErrorV("NUnaryOperator codegen not implemented yet");
+}
 
 llvm::Value *NApply::codeGen() {
     static std::map<std::string, int> projection_operators;
@@ -358,6 +369,7 @@ llvm::Value *NApply::codeGen() {
             return builder.CreateCall(func_func, apply);
         }
     }
+    return ErrorV("Something bad happened in NApply codegen");
 }
 
 llvm::Value *NFuncType::codeGen() {

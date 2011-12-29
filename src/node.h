@@ -62,7 +62,7 @@ public:
     NExpression& m;
     NExpression& r;
     NControl(NExpression& l, NExpression& m, NExpression& r) : l(l), m(m), r(r) {}
-    virtual llvm::Value* codeGen() {}
+    virtual llvm::Value* codeGen();
     void print(std::stringstream &ss);
     virtual NodeId getValueID() const { return NControlId; }
 };
@@ -96,7 +96,7 @@ public:
     int op;
     ExpressionList l;
     NComparisonOperator(int op) : op(op), l() {}
-    virtual llvm::Value* codeGen() {}
+    virtual llvm::Value* codeGen();
     void print(std::stringstream &ss);
     virtual NodeId getValueID() const { return NComparisonOperatorId; }
     static inline bool classof(const NExpression *b) {
@@ -120,7 +120,7 @@ class NUnaryOperator : public NExpression {
 public:
     NExpression& u;
     NUnaryOperator(NExpression& u) : u(u) {}
-    virtual llvm::Value* codeGen() {}
+    virtual llvm::Value* codeGen();
     void print(std::stringstream &ss);
     virtual NodeId getValueID() const { return NUnaryOperatorId; }
 };
