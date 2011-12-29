@@ -12,6 +12,10 @@ endif()
 find_package(LLVM REQUIRED)
 find_package(BISON REQUIRED)
 find_package(FLEX REQUIRED)
+find_library(ICONV_LIBRARY iconv)
+if(NOT ICONV_LIBRARY)
+    set(ICONV_LIBRARY "")
+endif()
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(SYSTEM ${CMAKE_CURRENT_BINARY_DIR})
@@ -43,5 +47,5 @@ target_link_libraries(aplc
     LLVMTarget
     LLVMCore
     LLVMSupport
-    iconv
+    ${ICONV_LIBRARY}
 )
