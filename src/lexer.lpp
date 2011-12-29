@@ -1,4 +1,6 @@
 %option noyywrap
+%option nounput
+%option noinput
 
 /* →  /xe2 /x86 /x92 */
 /* λ  /xce /xbb */
