@@ -56,14 +56,20 @@ struct UnresolvedType : public Type {
 llvm::Function *generate_identity()
 {
     std::vector<Type *> func_args;
-    func_args.push_back(UnresolvedType::get(0));
-    FunctionType *func_type = FunctionType::get(UnresolvedType::get(0), func_args, false);
+    func_args.push_back(builder.getInt64Ty());
+    func_args.push_back(builder.getInt64Ty());
+    FunctionType *func_type = FunctionType::get(StructType::create(func_args), func_args, false);
     Function *func = Function::Create(func_type, GlobalValue::InternalLinkage, "ι");
 
     BasicBlock *block = BasicBlock::Create(mod->getContext(), "entry", func, 0);
     llvm::IRBuilder<> builder(llvm::getGlobalContext());
     builder.SetInsertPoint(block);
-    builder.CreateRet(func->arg_begin());
+
+    std::vector<Value *> retvals;
+    for (Function::arg_iterator I = func->arg_begin(), E = func->arg_end(); I != E; ++I) {
+        retvals.push_back(I);
+    }
+    builder.CreateAggregateRet(&retvals[0], retvals.size());
 
     return func;
 }
@@ -363,7 +369,11 @@ llvm::Value *NApply::codeGen() {
             std::vector<Value *> args;
             for (size_t i = 0; i < cast<StructType>(apply->getType())->getNumElements(); ++i) {
                 args.push_back(builder.CreateExtractValue(apply, i));
+                if (!is_resolved(func_func)) {
+                    func_func = replace_unresolved(func_func, 0, args.back()->getType(), true);
+                }
             }
+            func_func = replace_unresolved(func_func, 0, builder.getVoidTy(), true);
             return builder.CreateCall(func_func, args);
         } else {
             return builder.CreateCall(func_func, apply);
@@ -553,8 +563,8 @@ static void print_value(llvm::Function *printf, llvm::Value *val)
 
             builder.CreateCall(printf, array_end);
         } else if (builder.CreateLoad(val)->getType()->isStructTy()) {
-            size_t size = cast<StructType>(builder.CreateLoad(val)->getType())->getNumElements();
             builder.CreateCall(printf, struct_beg);
+            size_t size = cast<StructType>(builder.CreateLoad(val)->getType())->getNumElements();
             for (size_t i = 0; i < size; ++i) {
                 builder.CreateCall2(printf, format_int, builder.CreateLoad(builder.CreateStructGEP(val, i)));
                 if (i != size - 1) builder.CreateCall(printf, struct_del);
@@ -570,6 +580,14 @@ static void print_value(llvm::Function *printf, llvm::Value *val)
         }
         builder.CreateCall(printf, array_end);
         return;
+    } else if (val->getType()->isStructTy()) {
+        builder.CreateCall(printf, struct_beg);
+        size_t size = cast<StructType>(val->getType())->getNumElements();
+        for (size_t i = 0; i < size; ++i) {
+            builder.CreateCall2(printf, format_int, builder.CreateExtractValue(val, i));
+            if (i != size - 1) builder.CreateCall(printf, struct_del);
+        }
+        builder.CreateCall(printf, struct_end);
     }
     builder.CreateCall(printf, format_newline);
 }
@@ -577,6 +595,19 @@ static void print_value(llvm::Function *printf, llvm::Value *val)
 void generate_code(ExpressionList *exprs)
 {
     mod = new Module("main", getGlobalContext());
+
+    FunctionPassManager OurFPM(mod);
+    // Provide basic AliasAnalysis support for GVN.
+    OurFPM.add(createBasicAliasAnalysisPass());
+    // Do simple "peephole" optimizations and bit-twiddling optzns.
+    OurFPM.add(createInstructionCombiningPass());
+    // Reassociate expressions.
+    OurFPM.add(createReassociatePass());
+    // Eliminate Common SubExpressions.
+    OurFPM.add(createGVNPass());
+    // Simplify the control flow graph (deleting unreachable blocks, etc).
+    OurFPM.add(createCFGSimplificationPass());
+    OurFPM.doInitialization();
 
     // main
     Type *func_main_args[] = { builder.getInt32Ty(), PointerType::get(builder.getInt8PtrTy(), 0) };
@@ -601,6 +632,8 @@ void generate_code(ExpressionList *exprs)
 
     // globals
     named_values["ι"] = generate_identity();
+    // named_values["α"] = generate_alpha();
+    // named_values["β"] = generate_beta();
     named_values["putchar"] = generate_putchar();
 
     for (size_t i = 0; i < exprs->size(); ++i) {
@@ -613,7 +646,10 @@ void generate_code(ExpressionList *exprs)
     builder.CreateRet(builder.getInt32(0));
 
     std::cerr << "Code is generated." << std::endl;
+    OurFPM.run(*func_main);
+
     PassManager pm;
+    pm.add(createFunctionInliningPass());
     pm.add(createPrintModulePass(&outs()));
     pm.run(*mod);
 }
