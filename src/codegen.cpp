@@ -249,7 +249,7 @@ static llvm::Function *replace_unresolved(llvm::Function *F, int index, Type *ty
         DestI->setName(I->getName());
         vmap[I] = DestI++;
     }
-    SmallVectorImpl<ReturnInst *> ri(0);
+    SmallVector<ReturnInst *, 0> ri;
     CloneFunctionInto(NewF, F, vmap, false, ri);
 
     return NewF;
