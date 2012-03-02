@@ -596,19 +596,6 @@ void generate_code(ExpressionList *exprs)
 {
     mod = new Module("main", getGlobalContext());
 
-    FunctionPassManager OurFPM(mod);
-    // Provide basic AliasAnalysis support for GVN.
-    OurFPM.add(createBasicAliasAnalysisPass());
-    // Do simple "peephole" optimizations and bit-twiddling optzns.
-    OurFPM.add(createInstructionCombiningPass());
-    // Reassociate expressions.
-    OurFPM.add(createReassociatePass());
-    // Eliminate Common SubExpressions.
-    OurFPM.add(createGVNPass());
-    // Simplify the control flow graph (deleting unreachable blocks, etc).
-    OurFPM.add(createCFGSimplificationPass());
-    OurFPM.doInitialization();
-
     // main
     Type *func_main_args[] = { builder.getInt32Ty(), PointerType::get(builder.getInt8PtrTy(), 0) };
     FunctionType* func_main_type = FunctionType::get(builder.getInt32Ty(), func_main_args, false);
@@ -646,7 +633,6 @@ void generate_code(ExpressionList *exprs)
     builder.CreateRet(builder.getInt32(0));
 
     std::cerr << "Code is generated." << std::endl;
-    OurFPM.run(*func_main);
 
     PassManager pm;
     pm.add(createFunctionInliningPass());
