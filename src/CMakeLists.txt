@@ -49,3 +49,7 @@ target_link_libraries(aplc
     LLVMSupport
     ${ICONV_LIBRARY}
 )
+
+if(LLVM_VERSION STRGREATER "3.0")
+    target_link_libraries(aplc LLVMVectorize)
+endif()
