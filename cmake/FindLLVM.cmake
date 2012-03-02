@@ -51,6 +51,12 @@ execute_process(
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
+execute_process(
+  COMMAND ${LLVM_CONFIG} --version
+  OUTPUT_VARIABLE LLVM_VERSION
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
 # Convert from whitespace-delimited words to a list
 string(REGEX MATCHALL "[a-zA-Z0-9]+" LLVM_TARGETS ${LLVM_TARGETS_STR})
 
